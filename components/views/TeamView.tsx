@@ -18,11 +18,14 @@ interface TeamViewProps {
   onChangePriority: (id: string, priority: string) => void;
   onChangeAssignee: (id: string, name: string | null) => void;
   onChangeDeadline?: (id: string, deadline: string | null) => void;
+  onNotifyAssignee?: (id: string) => void;
+  slackConnected?: boolean;
 }
 
 export default function TeamView({
   tasks, deals, dealDot, mobile, pushingId, recentAssignees,
   onToggle, onDelete, onEdit, onChangeDeal, onChangePriority, onChangeAssignee, onChangeDeadline,
+  onNotifyAssignee, slackConnected,
 }: TeamViewProps) {
   const openTasks = tasks.filter((t) => !t.done);
   const assigned: Record<string, Task[]> = {};
@@ -41,7 +44,8 @@ export default function TeamView({
 
   const taskRowProps = {
     onToggle, onDelete, onEdit, onChangeDeal, onChangePriority,
-    onChangeAssignee, onChangeDeadline, pushingId, recentAssignees, mobile, deals, dealDot,
+    onChangeAssignee, onChangeDeadline, onNotifyAssignee, slackConnected,
+    pushingId, recentAssignees, mobile, deals, dealDot,
   };
 
   if (people.length === 0 && unassigned.length === 0) {

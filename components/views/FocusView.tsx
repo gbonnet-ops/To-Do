@@ -20,11 +20,14 @@ interface FocusViewProps {
   onChangePriority: (id: string, priority: string) => void;
   onChangeAssignee: (id: string, name: string | null) => void;
   onChangeDeadline?: (id: string, deadline: string | null) => void;
+  onNotifyAssignee?: (id: string) => void;
+  slackConnected?: boolean;
 }
 
 export default function FocusView({
   tasks, calEvents, dealDot, deals, mobile, pushingId, recentAssignees,
   onToggle, onDelete, onEdit, onChangeDeal, onChangePriority, onChangeAssignee, onChangeDeadline,
+  onNotifyAssignee, slackConnected,
 }: FocusViewProps) {
   const today = todayStr();
   const todayMeetings = calEvents.filter((e) => e.date === today);
@@ -63,7 +66,8 @@ export default function FocusView({
 
   const taskRowProps = {
     onToggle, onDelete, onEdit, onChangeDeal, onChangePriority,
-    onChangeAssignee, onChangeDeadline, pushingId, recentAssignees, mobile, deals, dealDot,
+    onChangeAssignee, onChangeDeadline, onNotifyAssignee, slackConnected,
+    pushingId, recentAssignees, mobile, deals, dealDot,
   };
 
   return (

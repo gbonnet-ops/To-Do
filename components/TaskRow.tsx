@@ -14,6 +14,8 @@ interface TaskRowProps {
   onChangePriority: (id: string, priority: string) => void;
   onChangeAssignee: (id: string, name: string | null) => void;
   onChangeDeadline?: (id: string, deadline: string | null) => void;
+  onNotifyAssignee?: (id: string) => void;
+  slackConnected?: boolean;
   pushingId: string | null;
   recentAssignees: string[];
   mobile: boolean;
@@ -23,7 +25,8 @@ interface TaskRowProps {
 
 export default function TaskRow({
   task, onToggle, onDelete, onEdit, onChangeDeal, onChangePriority,
-  onChangeAssignee, onChangeDeadline, pushingId, recentAssignees,
+  onChangeAssignee, onChangeDeadline, onNotifyAssignee, slackConnected,
+  pushingId, recentAssignees,
   mobile, deals, dealDot,
 }: TaskRowProps) {
   const [editing, setEditing] = useState(false);
@@ -342,7 +345,7 @@ export default function TaskRow({
               <PriorityPicker position="right" />
             </div>
 
-            <div ref={assigneeRef} className="relative flex-shrink-0">
+            <div ref={assigneeRef} className="relative flex-shrink-0 flex items-center gap-0.5">
               <span
                 onClick={() => { setAssigneeOpen(!assigneeOpen); setAssigneeInput(task.assignee || ""); }}
                 className="cursor-pointer rounded transition-all duration-100"
@@ -355,6 +358,20 @@ export default function TaskRow({
               >
                 {task.assignee || "+"}
               </span>
+              {task.assignee && slackConnected && onNotifyAssignee && (
+                <span
+                  onClick={() => onNotifyAssignee(task.id)}
+                  className="cursor-pointer rounded transition-opacity duration-100"
+                  style={{
+                    fontSize: "11px",
+                    padding: "2px 4px",
+                    opacity: hovered ? 0.7 : 0,
+                  }}
+                  title={`Notifier ${task.assignee} sur Slack`}
+                >
+                  💬
+                </span>
+              )}
               {renderAssigneePicker("right")}
             </div>
           </>
@@ -425,7 +442,7 @@ export default function TaskRow({
             <PriorityPicker position="left" />
           </div>
 
-          <div ref={assigneeRef} className="relative">
+          <div ref={assigneeRef} className="relative flex items-center gap-0.5">
             <span
               onClick={() => { setAssigneeOpen(!assigneeOpen); setAssigneeInput(task.assignee || ""); }}
               className="cursor-pointer rounded"
@@ -438,6 +455,16 @@ export default function TaskRow({
             >
               {task.assignee || "👤"}
             </span>
+            {task.assignee && slackConnected && onNotifyAssignee && (
+              <span
+                onClick={() => onNotifyAssignee(task.id)}
+                className="cursor-pointer"
+                style={{ fontSize: "11px", padding: "2px 4px", opacity: 0.5 }}
+                title={`Notifier ${task.assignee} sur Slack`}
+              >
+                💬
+              </span>
+            )}
             {renderAssigneePicker("left")}
           </div>
 

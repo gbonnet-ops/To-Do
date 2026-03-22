@@ -24,12 +24,15 @@ interface WeekViewProps {
   onChangePriority: (id: string, priority: string) => void;
   onChangeAssignee: (id: string, name: string | null) => void;
   onChangeDeadline?: (id: string, deadline: string | null) => void;
+  onNotifyAssignee?: (id: string) => void;
+  slackConnected?: boolean;
 }
 
 export default function WeekView({
   tasks, calEvents, weekOffset, setWeekOffset, deals, dealDot, mobile,
   pushingId, recentAssignees, calLoading, onRefreshContexts,
   onToggle, onDelete, onEdit, onChangeDeal, onChangePriority, onChangeAssignee, onChangeDeadline,
+  onNotifyAssignee, slackConnected,
 }: WeekViewProps) {
   const weekDays = getWeekDays(weekOffset);
   const openTasks = tasks.filter((t) => !t.done);
@@ -43,7 +46,8 @@ export default function WeekView({
 
   const taskRowProps = {
     onToggle, onDelete, onEdit, onChangeDeal, onChangePriority,
-    onChangeAssignee, onChangeDeadline, pushingId, recentAssignees, mobile, deals, dealDot,
+    onChangeAssignee, onChangeDeadline, onNotifyAssignee, slackConnected,
+    pushingId, recentAssignees, mobile, deals, dealDot,
   };
 
   return (

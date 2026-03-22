@@ -538,31 +538,37 @@ export default function DealFlow() {
   }, []);
 
   const changeAssignee = useCallback((id: string, name: string | null) => {
-    setTasks((p) => {
-      const task = p.find((t) => t.id === id);
-      // Send Slack DM if assigning to someone new
-      if (name && task && task.assignee !== name && slackConnected) {
-        fetch("/api/slack/notify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            assigneeName: name,
-            taskText: task.text,
-            dealName: task.deal !== "Perso" ? task.deal : null,
-            priority: task.priority,
-            deadline: task.deadline,
-          }),
-        }).then((r) => r.json()).then((d) => {
-          if (d.sent) {
-            setStatusMsg({ type: "ok", text: `Notifié ${d.user} sur Slack` });
-            setTimeout(() => setStatusMsg(null), 3000);
-          }
-        }).catch(() => {});
-      }
-      return p.map((t) => t.id === id ? { ...t, assignee: name || null } : t);
-    });
+    setTasks((p) => p.map((t) => t.id === id ? { ...t, assignee: name || null } : t));
     apiUpdateTask(id, { assignee: name || null }).catch(() => {});
-  }, [slackConnected]);
+  }, []);
+
+  const notifyAssignee = useCallback(async (id: string) => {
+    const task = tasks.find((t) => t.id === id);
+    if (!task?.assignee) return;
+    setStatusMsg({ type: "info", text: `Notification Slack à ${task.assignee}...` });
+    try {
+      const res = await fetch("/api/slack/notify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          assigneeName: task.assignee,
+          taskText: task.text,
+          dealName: task.deal !== "Perso" ? task.deal : null,
+          priority: task.priority,
+          deadline: task.deadline,
+        }),
+      });
+      const d = await res.json();
+      if (d.sent) {
+        setStatusMsg({ type: "ok", text: `Notifié ${d.user} sur Slack` });
+      } else {
+        setStatusMsg({ type: "error", text: d.reason || "Utilisateur non trouvé sur Slack" });
+      }
+    } catch {
+      setStatusMsg({ type: "error", text: "Erreur envoi Slack" });
+    }
+    setTimeout(() => setStatusMsg(null), 4000);
+  }, [tasks]);
 
   const changeDeadline = useCallback((id: string, deadline: string | null) => {
     setTasks((p) => p.map((t) => t.id === id ? { ...t, deadline } : t));
@@ -1035,6 +1041,8 @@ export default function DealFlow() {
                 onChangePriority={changePri}
                 onChangeAssignee={changeAssignee}
                 onChangeDeadline={changeDeadline}
+                onNotifyAssignee={notifyAssignee}
+                slackConnected={slackConnected}
               />
             )}
 
@@ -1054,6 +1062,8 @@ export default function DealFlow() {
                 onChangePriority={changePri}
                 onChangeAssignee={changeAssignee}
                 onChangeDeadline={changeDeadline}
+                onNotifyAssignee={notifyAssignee}
+                slackConnected={slackConnected}
               />
             )}
           </>
@@ -1080,6 +1090,8 @@ export default function DealFlow() {
             onChangePriority={changePri}
             onChangeAssignee={changeAssignee}
             onChangeDeadline={changeDeadline}
+            onNotifyAssignee={notifyAssignee}
+            slackConnected={slackConnected}
           />
         )}
 
@@ -1099,6 +1111,8 @@ export default function DealFlow() {
             onChangePriority={changePri}
             onChangeAssignee={changeAssignee}
             onChangeDeadline={changeDeadline}
+            onNotifyAssignee={notifyAssignee}
+            slackConnected={slackConnected}
           />
         )}
 

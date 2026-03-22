@@ -115,7 +115,12 @@ ${emailList}
 
 For each task that appears to be completed based on the sent emails, return a JSON object.
 For example, if a task says "envoyer mail Fabrice" and there is a sent email to Fabrice, that task is likely done.
-Be reasonably confident — only suggest completion if there's a clear match.
+
+CRITICAL RULES:
+- The email must DIRECTLY relate to the specific task. A match requires both the ACTION and the RECIPIENT/SUBJECT to align.
+- NEVER match a task from one project/deal with an email about a DIFFERENT project/deal. For example, a task about "Babylon" cannot be marked as done by an email about "Darwin" or "Nova" etc.
+- The deal/project name in the task MUST match the email context. If a task is tagged to deal "Babylon", only emails clearly about Babylon can complete it.
+- Be STRICT — only suggest completion if there's an obvious, direct match. When in doubt, do NOT include it.
 
 Return ONLY a valid JSON array where each item has:
 - "taskId": the task id

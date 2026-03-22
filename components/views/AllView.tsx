@@ -18,17 +18,21 @@ interface AllViewProps {
   onChangePriority: (id: string, priority: string) => void;
   onChangeAssignee: (id: string, name: string | null) => void;
   onChangeDeadline?: (id: string, deadline: string | null) => void;
+  onNotifyAssignee?: (id: string) => void;
+  slackConnected?: boolean;
 }
 
 export default function AllView({
   tasks, showDone, deals, dealDot, mobile, pushingId, recentAssignees,
   onToggle, onDelete, onEdit, onChangeDeal, onChangePriority, onChangeAssignee, onChangeDeadline,
+  onNotifyAssignee, slackConnected,
 }: AllViewProps) {
   const display = showDone ? tasks : tasks.filter((t) => !t.done);
 
   const taskRowProps = {
     onToggle, onDelete, onEdit, onChangeDeal, onChangePriority,
-    onChangeAssignee, onChangeDeadline, pushingId, recentAssignees, mobile, deals, dealDot,
+    onChangeAssignee, onChangeDeadline, onNotifyAssignee, slackConnected,
+    pushingId, recentAssignees, mobile, deals, dealDot,
   };
 
   if (display.filter((t) => !t.done).length === 0 && !showDone) {
