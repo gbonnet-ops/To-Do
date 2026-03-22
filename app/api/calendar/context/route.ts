@@ -255,7 +255,7 @@ export async function POST(request: Request) {
     return `Meeting "${event?.title}"${dealInfo} (key: ${key}):\n${msgText}`;
   }).join("\n\n");
 
-  const prompt = `Pour chaque meeting ci-dessous, génère un résumé de contexte TRÈS court (max 80 caractères) basé UNIQUEMENT sur les échanges email/Slack fournis. Résume ce qui a été discuté concrètement, pas le sujet général du projet.
+  const prompt = `Pour chaque meeting ci-dessous, génère un résumé de contexte court (max 200 caractères) basé UNIQUEMENT sur les échanges email/Slack fournis. Résume ce qui a été discuté concrètement, pas le sujet général du projet.
 
 ${eventSummaries}
 
@@ -271,7 +271,7 @@ No markdown, just JSON object.`;
 
   let textContent: string;
   try {
-    textContent = await callClaude(prompt, { maxTokens: 1000 });
+    textContent = await callClaude(prompt, { maxTokens: 2000 });
   } catch {
     return NextResponse.json({ contexts: {} });
   }
