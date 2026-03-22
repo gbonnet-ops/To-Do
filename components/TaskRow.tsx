@@ -49,7 +49,7 @@ export default function TaskRow({
       const target = e.target as Node;
       if (dealRef.current && !dealRef.current.contains(target)) setDealOpen(false);
       if (priRef.current && !priRef.current.contains(target)) setPriOpen(false);
-      if (assigneeRef.current && !assigneeRef.current.contains(target)) setAssigneeOpen(false);
+      if (assigneeRef.current && !assigneeRef.current.contains(target) && document.activeElement !== assigneeInputRef.current) setAssigneeOpen(false);
     };
     document.addEventListener("mousedown", h);
     document.addEventListener("touchstart", h);
