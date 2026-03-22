@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getGoogleTokens, googleFetch } from "@/lib/google";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { EXCLUDED_TITLES } from "@/lib/constants";
+import { isValidDate, sanitizeString } from "@/lib/validation";
 
 interface CalendarEvent {
   summary?: string;
@@ -19,8 +20,8 @@ export async function GET(request: Request) {
   const start = searchParams.get("start");
   const end = searchParams.get("end");
 
-  if (!start || !end) {
-    return NextResponse.json({ error: "Missing start/end params" }, { status: 400 });
+  if (!isValidDate(start) || !isValidDate(end)) {
+    return NextResponse.json({ error: "Invalid start/end params (expected YYYY-MM-DD)" }, { status: 400 });
   }
 
   const timeMin = new Date(`${start}T00:00:00Z`).toISOString();
@@ -100,10 +101,12 @@ export async function POST(request: Request) {
   if (!tokens) return NextResponse.json({ error: "No Google tokens" }, { status: 401 });
 
   const body = await request.json();
-  const { title, date, description } = body;
+  const title = sanitizeString(body.title, 200);
+  const date = body.date;
+  const description = sanitizeString(body.description, 1000);
 
-  if (!title || !date) {
-    return NextResponse.json({ error: "Missing title/date" }, { status: 400 });
+  if (!title || !isValidDate(date)) {
+    return NextResponse.json({ error: "Missing or invalid title/date" }, { status: 400 });
   }
 
   const event = await googleFetch(
@@ -113,7 +116,7 @@ export async function POST(request: Request) {
       method: "POST",
       body: JSON.stringify({
         summary: title,
-        description: description || "",
+        description: description,
         start: { date },
         end: { date },
       }),

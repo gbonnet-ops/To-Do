@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
+import { isValidUUID, isValidDate, isValidPriority, sanitizeString } from "@/lib/validation";
 
 export async function GET() {
   const supabase = await createServerSupabaseClient();
@@ -52,20 +53,26 @@ export async function POST(request: Request) {
     dealId = deal?.id || null;
   }
 
+  const text = sanitizeString(body.text, 500);
+  if (!text) return NextResponse.json({ error: "Missing task text" }, { status: 400 });
+
+  const priority = isValidPriority(body.priority) ? body.priority : "medium";
+  const deadline = isValidDate(body.deadline) ? body.deadline : null;
+
   const insertData: Record<string, unknown> = {
       user_id: user.id,
       deal_id: dealId,
-      text: body.text,
-      priority: body.priority || "medium",
-      deadline: body.deadline || null,
-      assignee: body.assignee || null,
+      text,
+      priority,
+      deadline,
+      assignee: sanitizeString(body.assignee, 100) || null,
       done: false,
-      source: body.source || "manual",
+      source: sanitizeString(body.source, 100) || "manual",
       source_email_id: body.source_email_id || null,
   };
 
   // Accept client-provided UUID for optimistic updates
-  if (body.id) {
+  if (body.id && isValidUUID(body.id)) {
     insertData.id = body.id;
   }
 
@@ -87,7 +94,7 @@ export async function PATCH(request: Request) {
   const body = await request.json();
   const { id, ...updates } = body;
 
-  if (!id) return NextResponse.json({ error: "Missing task id" }, { status: 400 });
+  if (!isValidUUID(id)) return NextResponse.json({ error: "Invalid task id" }, { status: 400 });
 
   // Handle deal name → deal_id conversion
   if (updates.deal) {
@@ -132,7 +139,7 @@ export async function DELETE(request: Request) {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
 
-  if (!id) return NextResponse.json({ error: "Missing task id" }, { status: 400 });
+  if (!isValidUUID(id)) return NextResponse.json({ error: "Invalid task id" }, { status: 400 });
 
   const { error } = await supabase
     .from("tasks")

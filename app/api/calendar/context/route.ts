@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getGoogleTokens, googleFetch } from "@/lib/google";
 import { getSlackTokens, searchSlackMessages } from "@/lib/slack";
+import { createServerSupabaseClient } from "@/lib/supabase-server";
+import { rateLimit } from "@/lib/rate-limit";
 
 interface GmailMessageDetail {
   id: string;
@@ -52,6 +54,13 @@ function extractKeywords(title: string): string[] {
 
 // POST /api/calendar/context — Generate short context summaries for calendar events
 export async function POST(request: Request) {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const limited = rateLimit(user.id, "calendar-context", { maxRequests: 10, windowMs: 60_000 });
+  if (limited) return limited;
+
   const tokens = await getGoogleTokens();
   if (!tokens) return NextResponse.json({ error: "No Google tokens" }, { status: 401 });
 

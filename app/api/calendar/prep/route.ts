@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { getGoogleTokens, googleFetch } from "@/lib/google";
+import { createServerSupabaseClient } from "@/lib/supabase-server";
+import { rateLimit } from "@/lib/rate-limit";
 
 interface GmailMessageDetail {
   id: string;
@@ -35,6 +37,13 @@ function getHeader(msg: GmailMessageDetail, name: string): string {
 
 // POST /api/calendar/prep — AI-powered meeting prep suggestions
 export async function POST(request: Request) {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const limited = rateLimit(user.id, "calendar-prep", { maxRequests: 5, windowMs: 60_000 });
+  if (limited) return limited;
+
   const tokens = await getGoogleTokens();
   if (!tokens) return NextResponse.json({ error: "No Google tokens" }, { status: 401 });
 

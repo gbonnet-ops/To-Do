@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
+import { sanitizeString } from "@/lib/validation";
 
 export async function GET() {
   const supabase = await createServerSupabaseClient();
@@ -32,12 +33,15 @@ export async function POST(request: Request) {
 
   const body = await request.json();
 
+  const name = sanitizeString(body.name, 100);
+  if (!name) return NextResponse.json({ error: "Missing deal name" }, { status: 400 });
+
   const { data, error } = await supabase
     .from("deals")
     .insert({
       user_id: user.id,
-      name: body.name,
-      color: body.color,
+      name,
+      color: sanitizeString(body.color, 20) || "#888",
       keywords: body.keywords || [],
       sort_order: body.sort_order || 0,
     })
