@@ -3,6 +3,7 @@ import { getGoogleTokens, googleFetch } from "@/lib/google";
 import { getSlackTokens, searchSlackWithContext } from "@/lib/slack";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { rateLimit } from "@/lib/rate-limit";
+import { callClaude } from "@/lib/claude";
 
 interface GmailMessageDetail {
   id: string;
@@ -96,8 +97,7 @@ export async function POST(request: Request) {
 
   if (!title) return NextResponse.json({ error: "Missing title" }, { status: 400 });
 
-  const openaiKey = process.env.OPENAI_API_KEY;
-  if (!openaiKey) return NextResponse.json({ error: "OPENAI_API_KEY not configured" }, { status: 500 });
+  // Claude API key is checked inside callClaude()
 
   const attendees = rawAttendees || [];
 
@@ -285,23 +285,7 @@ Génère un briefing de préparation concis mais complet en français (3-6 ligne
 Sois direct et factuel. Pas de formule de politesse. Retourne uniquement le texte du briefing. Si les messages ne sont pas pertinents au meeting, dis-le en une phrase.`;
 
   try {
-    const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${openaiKey}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        max_tokens: 500,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
-
-    if (!openaiRes.ok) return NextResponse.json({ context: null });
-
-    const data = await openaiRes.json();
-    const context = data.choices?.[0]?.message?.content?.trim() || null;
+    const context = (await callClaude(prompt, { maxTokens: 500 }))?.trim() || null;
     return NextResponse.json({ context });
   } catch {
     return NextResponse.json({ context: null });

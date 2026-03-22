@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSlackTokens, searchSlackMessages, findChannelsByKeywords } from "@/lib/slack";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { rateLimit } from "@/lib/rate-limit";
+import { callClaude } from "@/lib/claude";
 
 // POST /api/slack/scan — Scan Slack messages and extract task suggestions
 export async function POST(request: Request) {
@@ -54,11 +55,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ suggestions: [] });
   }
 
-  const openaiKey = process.env.OPENAI_API_KEY;
-  if (!openaiKey) {
-    return NextResponse.json({ error: "OPENAI_API_KEY not configured" }, { status: 500 });
-  }
-
   const existingDesc = existingTasks.slice(0, 15).join("; ");
   const msgSummary = unique
     .map((m, i) => `Slack ${i + 1}:\nFrom: @${m.from} in #${m.channel}\nDate: ${m.date}\nMessage: ${m.text}\n---`)
@@ -82,26 +78,12 @@ Return ONLY a valid JSON array where each suggested task has:
 
 Only include actionable items. Max 8 suggestions. No markdown, no explanation, just JSON array. If no tasks found, return [].`;
 
-  const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${openaiKey}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      max_tokens: 2048,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-
-  if (!openaiRes.ok) {
-    const err = await openaiRes.text().catch(() => "");
-    return NextResponse.json({ error: `OpenAI API: ${err.slice(0, 200)}` }, { status: 500 });
+  let textContent: string;
+  try {
+    textContent = await callClaude(prompt, { maxTokens: 2048 });
+  } catch (e) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : "Claude API error" }, { status: 500 });
   }
-
-  const openaiData = await openaiRes.json();
-  const textContent = openaiData.choices?.[0]?.message?.content || "";
 
   try {
     const cleaned = textContent.replace(/```json|```/g, "").trim();

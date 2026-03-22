@@ -54,6 +54,14 @@ export default function DealFlow() {
   const [showSettings, setShowSettings] = useState(false);
   const [completionSuggestions, setCompletionSuggestions] = useState<CompletionSuggestion[]>([]);
   const [meetingPreps, setMeetingPreps] = useState<MeetingPrepSuggestion[]>([]);
+  const [slackPicker, setSlackPicker] = useState<{
+    taskId: string;
+    matches: Array<{ id: string; name: string; displayName: string; avatar: string | null }>;
+  } | null>(null);
+  const [slackMappings, setSlackMappings] = useState<Record<string, string>>(() => {
+    if (typeof window === "undefined") return {};
+    try { return JSON.parse(localStorage.getItem("slack-mappings") || "{}"); } catch { return {}; }
+  });
   const mobile = useIsMobile();
 
   // Derived
@@ -542,8 +550,8 @@ export default function DealFlow() {
     apiUpdateTask(id, { assignee: name || null }).catch(() => {});
   }, []);
 
-  const notifyAssignee = useCallback(async (id: string) => {
-    const task = tasks.find((t) => t.id === id);
+  const sendSlackNotify = useCallback(async (taskId: string, slackUserId?: string) => {
+    const task = tasks.find((t) => t.id === taskId);
     if (!task?.assignee) return;
     setStatusMsg({ type: "info", text: `Notification Slack à ${task.assignee}...` });
     try {
@@ -556,11 +564,22 @@ export default function DealFlow() {
           dealName: task.deal !== "Perso" ? task.deal : null,
           priority: task.priority,
           deadline: task.deadline,
+          slackUserId: slackUserId || slackMappings[task.assignee.toLowerCase()] || undefined,
         }),
       });
       const d = await res.json();
       if (d.sent) {
+        // Save the mapping for future use
+        const key = task.assignee.toLowerCase();
+        const updated = { ...slackMappings, [key]: d.slackUserId };
+        setSlackMappings(updated);
+        try { localStorage.setItem("slack-mappings", JSON.stringify(updated)); } catch {}
         setStatusMsg({ type: "ok", text: `Notifié ${d.user} sur Slack` });
+      } else if (d.ambiguous && d.matches) {
+        // Multiple matches — show picker
+        setSlackPicker({ taskId, matches: d.matches });
+        setStatusMsg(null);
+        return; // don't auto-clear
       } else {
         setStatusMsg({ type: "error", text: d.reason || "Utilisateur non trouvé sur Slack" });
       }
@@ -568,7 +587,11 @@ export default function DealFlow() {
       setStatusMsg({ type: "error", text: "Erreur envoi Slack" });
     }
     setTimeout(() => setStatusMsg(null), 4000);
-  }, [tasks]);
+  }, [tasks, slackMappings]);
+
+  const notifyAssignee = useCallback(async (id: string) => {
+    await sendSlackNotify(id);
+  }, [sendSlackNotify]);
 
   const changeDeadline = useCallback((id: string, deadline: string | null) => {
     setTasks((p) => p.map((t) => t.id === id ? { ...t, deadline } : t));
@@ -1124,6 +1147,74 @@ export default function DealFlow() {
           />
         )}
       </div>
+
+      {/* Slack user picker modal — shown when multiple Slack users match an assignee name */}
+      {slackPicker && (
+        <div
+          onClick={() => setSlackPicker(null)}
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",
+            display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "#18181B", border: "1px solid rgba(255,255,255,0.1)",
+              borderRadius: "12px", padding: "20px", minWidth: "280px", maxWidth: "360px",
+            }}
+          >
+            <div style={{ fontSize: "14px", fontWeight: 600, color: "#F1F5F9", marginBottom: "12px" }}>
+              Plusieurs utilisateurs trouvés
+            </div>
+            <div style={{ fontSize: "12px", color: "#94A3B8", marginBottom: "16px" }}>
+              Qui souhaitez-vous notifier ?
+            </div>
+            {slackPicker.matches.map((m) => (
+              <div
+                key={m.id}
+                onClick={async () => {
+                  const taskId = slackPicker.taskId;
+                  setSlackPicker(null);
+                  await sendSlackNotify(taskId, m.id);
+                }}
+                className="cursor-pointer"
+                style={{
+                  display: "flex", alignItems: "center", gap: "10px",
+                  padding: "10px 12px", borderRadius: "8px", marginBottom: "4px",
+                  transition: "background 0.1s",
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.06)")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+              >
+                {m.avatar && (
+                  <img
+                    src={m.avatar}
+                    alt=""
+                    style={{ width: "32px", height: "32px", borderRadius: "50%" }}
+                  />
+                )}
+                <div>
+                  <div style={{ fontSize: "13px", fontWeight: 500, color: "#E2E8F0" }}>{m.name}</div>
+                  {m.displayName !== m.name && (
+                    <div style={{ fontSize: "11px", color: "#64748B" }}>@{m.displayName}</div>
+                  )}
+                </div>
+              </div>
+            ))}
+            <div
+              onClick={() => setSlackPicker(null)}
+              className="cursor-pointer"
+              style={{
+                marginTop: "12px", textAlign: "center",
+                fontSize: "12px", color: "#64748B", padding: "6px",
+              }}
+            >
+              Annuler
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

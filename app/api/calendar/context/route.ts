@@ -3,6 +3,7 @@ import { getGoogleTokens, googleFetch } from "@/lib/google";
 import { getSlackTokens, searchSlackWithContext } from "@/lib/slack";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { rateLimit } from "@/lib/rate-limit";
+import { callClaude } from "@/lib/claude";
 
 interface GmailMessageDetail {
   id: string;
@@ -229,11 +230,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ contexts: {} });
   }
 
-  const openaiKey = process.env.OPENAI_API_KEY;
-  if (!openaiKey) {
-    return NextResponse.json({ error: "OPENAI_API_KEY not configured" }, { status: 500 });
-  }
-
   // Group messages by event
   const msgsByEvent: Record<string, typeof allMessages> = {};
   for (const msg of allMessages) {
@@ -268,25 +264,12 @@ Example: {"title|2025-03-20T10:00:00": "Jean demande validation du contrat avant
 
 No markdown, just JSON object.`;
 
-  const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${openaiKey}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      max_tokens: 1000,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-
-  if (!openaiRes.ok) {
+  let textContent: string;
+  try {
+    textContent = await callClaude(prompt, { maxTokens: 1000 });
+  } catch {
     return NextResponse.json({ contexts: {} });
   }
-
-  const openaiData = await openaiRes.json();
-  const textContent = openaiData.choices?.[0]?.message?.content || "";
 
   try {
     const cleaned = textContent.replace(/```json|```/g, "").trim();
