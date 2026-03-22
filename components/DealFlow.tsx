@@ -87,10 +87,13 @@ export default function DealFlow() {
   }, []);
 
   useEffect(() => {
-    loadFromApi().then(() => {
+    loadFromApi().then((ok) => {
       setLoading(false);
       setTimeout(() => { initialized.current = true; }, 50);
+      // Auto-sync calendar on first load if logged in
+      if (ok) syncCalendar();
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadFromApi]);
 
   // Persist to localStorage on changes

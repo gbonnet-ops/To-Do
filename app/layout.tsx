@@ -4,6 +4,14 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "DealFlow",
   description: "M&A Task Manager",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "DealFlow",
+  },
+  other: {
+    "mobile-web-app-capable": "yes",
+  },
 };
 
 export default function RootLayout({
