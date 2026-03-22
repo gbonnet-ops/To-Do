@@ -45,4 +45,10 @@ export interface StatusMessage {
   text: string;
 }
 
+export interface CompletionSuggestion {
+  taskId: string;
+  taskText: string;
+  reason: string;
+}
+
 export type ViewType = "focus" | "all" | "week" | "team";

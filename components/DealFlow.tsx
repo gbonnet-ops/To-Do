@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Task, Deal, CalendarEvent, EmailSuggestion, StatusMessage, ViewType } from "@/lib/types";
+import { Task, Deal, CalendarEvent, EmailSuggestion, CompletionSuggestion, StatusMessage, ViewType } from "@/lib/types";
 import { DEFAULT_DEALS } from "@/lib/constants";
 import { uid, todayStr, isOverdue, isToday, greet, getWeekDays, formatDeadline } from "@/lib/utils";
 import {
@@ -47,6 +47,7 @@ export default function DealFlow() {
   const [pushingId, setPushingId] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<StatusMessage | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [completionSuggestions, setCompletionSuggestions] = useState<CompletionSuggestion[]>([]);
   const mobile = useIsMobile();
 
   // Derived
@@ -54,7 +55,7 @@ export default function DealFlow() {
   const DEAL_DOT: Record<string, string> = Object.fromEntries(deals.map((d) => [d.name, d.color]));
 
   // ── Load data from API (source of truth), fallback to localStorage ──
-  const loadFromApi = useCallback(async () => {
+  const loadFromApi = useCallback(async (): Promise<{ ok: boolean; tasks: Task[] }> => {
     try {
       const [apiTasks, apiDeals] = await Promise.all([fetchTasks(), fetchDeals()]);
 
@@ -78,21 +79,51 @@ export default function DealFlow() {
 
       setTasks(apiTasks);
       saveTasks(apiTasks);
-      return true;
+      return { ok: true, tasks: apiTasks };
     } catch {
       // API failed (not logged in or network error) — use localStorage
-      setTasks(loadTasks());
+      const localTasks = loadTasks();
+      setTasks(localTasks);
       setDeals(loadDeals());
-      return false;
+      return { ok: false, tasks: localTasks };
+    }
+  }, []);
+
+  // ── Auto-detect completed tasks from sent emails ──
+  const checkCompletions = useCallback(async (currentTasks: Task[]) => {
+    try {
+      const openTasks = currentTasks
+        .filter((t) => !t.done)
+        .slice(0, 30)
+        .map((t) => ({ id: t.id, text: t.text, deal: t.deal, assignee: t.assignee }));
+      if (openTasks.length === 0) return;
+
+      const res = await fetch("/api/gmail/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ openTasks }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const completions: CompletionSuggestion[] = data.completions || [];
+      if (completions.length > 0) {
+        setCompletionSuggestions(completions);
+      }
+    } catch {
+      // Silent fail — non-critical feature
     }
   }, []);
 
   useEffect(() => {
-    loadFromApi().then((ok) => {
+    loadFromApi().then((result) => {
       setLoading(false);
       setTimeout(() => { initialized.current = true; }, 50);
       // Auto-sync calendar on first load if logged in
-      if (ok) syncCalendar();
+      if (result.ok) {
+        syncCalendar();
+        // Check for completed tasks based on sent emails
+        checkCompletions(result.tasks);
+      }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadFromApi]);
@@ -105,12 +136,14 @@ export default function DealFlow() {
   useEffect(() => {
     const onVisibility = () => {
       if (document.visibilityState === "visible" && initialized.current) {
-        loadFromApi().catch(() => {});
+        loadFromApi().then((result) => {
+          if (result.ok) checkCompletions(result.tasks);
+        }).catch(() => {});
       }
     };
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, [loadFromApi]);
+  }, [loadFromApi, checkCompletions]);
 
   // Recent assignees
   const recentAssignees = [...new Set(tasks.map((t) => t.assignee).filter(Boolean))] as string[];
@@ -200,6 +233,26 @@ export default function DealFlow() {
       apiAddTask({ id: t.id, text: t.text, deal: t.deal, priority: t.priority, deadline: t.deadline, assignee: t.assignee, source: "gmail" }).catch(() => {});
     }
   }, [suggestions]);
+
+  // ── Accept/dismiss completion suggestions ──
+  const acceptCompletion = useCallback((taskId: string) => {
+    setTasks((p) => p.map((t) =>
+      t.id === taskId ? { ...t, done: true, completed_at: new Date().toISOString() } : t
+    ));
+    apiUpdateTask(taskId, { done: true }).catch(() => {});
+    setCompletionSuggestions((p) => p.filter((c) => c.taskId !== taskId));
+  }, []);
+
+  const acceptAllCompletions = useCallback(() => {
+    const ids = new Set(completionSuggestions.map((c) => c.taskId));
+    setTasks((p) => p.map((t) =>
+      ids.has(t.id) ? { ...t, done: true, completed_at: new Date().toISOString() } : t
+    ));
+    for (const id of ids) {
+      apiUpdateTask(id, { done: true }).catch(() => {});
+    }
+    setCompletionSuggestions([]);
+  }, [completionSuggestions]);
 
   // ── Push task deadline to calendar ──
   const pushTaskToCalendar = useCallback(async (id: string) => {
@@ -430,6 +483,58 @@ export default function DealFlow() {
             >
               ✕
             </span>
+          </div>
+        )}
+
+        {/* ── COMPLETION SUGGESTIONS ── */}
+        {completionSuggestions.length > 0 && (
+          <div
+            className="rounded-[10px] mb-3"
+            style={{
+              background: "rgba(129,140,248,0.05)",
+              border: "1px solid rgba(129,140,248,0.12)",
+              padding: "10px 12px",
+            }}
+          >
+            <div className="flex justify-between items-center mb-2">
+              <span style={{ fontSize: "11px", fontWeight: 500, color: "#818CF8" }}>
+                ✅ {completionSuggestions.length} tâche{completionSuggestions.length > 1 ? "s" : ""} probablement terminée{completionSuggestions.length > 1 ? "s" : ""}
+              </span>
+              <div className="flex gap-2">
+                <span onClick={acceptAllCompletions} className="cursor-pointer" style={{ fontSize: "10px", color: "#818CF8" }}>
+                  Tout compléter
+                </span>
+                <span onClick={() => setCompletionSuggestions([])} className="cursor-pointer" style={{ fontSize: "10px", color: "#52525B" }}>
+                  Ignorer
+                </span>
+              </div>
+            </div>
+            {completionSuggestions.map((c, i) => (
+              <div
+                key={c.taskId}
+                className="flex items-center gap-2"
+                style={{ padding: "8px 0", borderTop: i > 0 ? "1px solid rgba(255,255,255,0.03)" : "none" }}
+              >
+                <div className="flex-1 min-w-0">
+                  <div style={{ fontSize: "13px", color: "#CBD5E1", marginBottom: "3px", textDecoration: "line-through", opacity: 0.7 }}>{c.taskText}</div>
+                  <div style={{ fontSize: "10px", color: "#818CF8" }}>{c.reason}</div>
+                </div>
+                <div
+                  onClick={() => acceptCompletion(c.taskId)}
+                  className="cursor-pointer rounded-md"
+                  style={{ padding: "5px 10px", fontSize: "11px", color: "#818CF8", background: "rgba(129,140,248,0.1)" }}
+                >
+                  ✓ Fait
+                </div>
+                <div
+                  onClick={() => setCompletionSuggestions((p) => p.filter((x) => x.taskId !== c.taskId))}
+                  className="cursor-pointer rounded-md"
+                  style={{ padding: "5px 8px", fontSize: "11px", color: "#52525B" }}
+                >
+                  ✕
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
