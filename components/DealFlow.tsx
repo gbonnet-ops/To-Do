@@ -240,6 +240,44 @@ export default function DealFlow() {
     }
   }, []);
 
+  // ── Refresh all contexts (clear cache + re-fetch) ──
+  const refreshContexts = useCallback(async () => {
+    if (calLoading) return;
+    setCalLoading(true);
+    setStatusMsg({ type: "info", text: "Actualisation des contextes..." });
+    try {
+      // Clear cached contexts to force re-fetch
+      saveCalContexts({});
+      const eventsToFetch = calEvents.map((e) => ({
+        key: calEventKey(e.title, e.start),
+        title: e.title,
+      }));
+      if (eventsToFetch.length > 0) {
+        const res = await fetch("/api/calendar/context", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ events: eventsToFetch }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const newContexts: Record<string, string> = data.contexts || {};
+          saveCalContexts(newContexts);
+          setCalEvents((prev) =>
+            prev.map((e) => {
+              const key = calEventKey(e.title, e.start);
+              return { ...e, context: newContexts[key] || null };
+            })
+          );
+        }
+      }
+      setStatusMsg({ type: "ok", text: "Contextes actualisés" });
+    } catch {
+      setStatusMsg({ type: "error", text: "Erreur actualisation contextes" });
+    }
+    setCalLoading(false);
+    setTimeout(() => setStatusMsg(null), 5000);
+  }, [calEvents, calLoading]);
+
   // ── Gmail scan ──
   const scanEmails = useCallback(async () => {
     setScanLoading(true);
@@ -953,6 +991,8 @@ export default function DealFlow() {
             mobile={mobile}
             pushingId={pushingId}
             recentAssignees={recentAssignees}
+            calLoading={calLoading}
+            onRefreshContexts={refreshContexts}
             onToggle={toggle}
             onDelete={del}
             onEdit={edit}

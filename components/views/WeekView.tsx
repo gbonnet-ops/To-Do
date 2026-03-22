@@ -15,6 +15,8 @@ interface WeekViewProps {
   mobile: boolean;
   pushingId: string | null;
   recentAssignees: string[];
+  calLoading: boolean;
+  onRefreshContexts: () => void;
   onToggle: (id: string) => void;
   onDelete: (id: string) => void;
   onEdit: (id: string, text: string) => void;
@@ -26,7 +28,7 @@ interface WeekViewProps {
 
 export default function WeekView({
   tasks, calEvents, weekOffset, setWeekOffset, deals, dealDot, mobile,
-  pushingId, recentAssignees,
+  pushingId, recentAssignees, calLoading, onRefreshContexts,
   onToggle, onDelete, onEdit, onChangeDeal, onChangePriority, onChangeAssignee, onChangeDeadline,
 }: WeekViewProps) {
   const weekDays = getWeekDays(weekOffset);
@@ -70,15 +72,31 @@ export default function WeekView({
             ›
           </div>
         </div>
-        {weekOffset !== 0 && (
+        <div className="flex items-center gap-2">
+          {weekOffset !== 0 && (
+            <span
+              onClick={() => setWeekOffset(() => 0)}
+              className="cursor-pointer rounded-[5px]"
+              style={{ fontSize: "11px", color: "#818CF8", padding: "4px 8px", background: "rgba(129,140,248,0.08)" }}
+            >
+              Aujourd&apos;hui
+            </span>
+          )}
           <span
-            onClick={() => setWeekOffset(() => 0)}
-            className="cursor-pointer rounded-[5px]"
-            style={{ fontSize: "11px", color: "#818CF8", padding: "4px 8px", background: "rgba(129,140,248,0.08)" }}
+            onClick={!calLoading ? onRefreshContexts : undefined}
+            className="cursor-pointer rounded-[5px] transition-all duration-150"
+            style={{
+              fontSize: "11px",
+              padding: "4px 8px",
+              color: calLoading ? "#FBBF24" : "#52525B",
+              background: calLoading ? "rgba(251,191,36,0.08)" : "rgba(255,255,255,0.04)",
+              cursor: calLoading ? "wait" : "pointer",
+            }}
+            title="Actualiser les contextes"
           >
-            Aujourd&apos;hui
+            {calLoading ? "⏳" : "🔄"}
           </span>
-        )}
+        </div>
       </div>
 
       {/* Overdue section */}
