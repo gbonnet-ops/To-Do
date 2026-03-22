@@ -190,11 +190,13 @@ export default function DealFlow() {
       }
 
       // Fetch contexts for events that don't have one yet
+      // Also re-fetch if there are new events (new emails may update context for existing meetings)
+      const hasNewEvents = newEvents.length > 0;
       const eventsNeedingContext = eventsWithContext.filter(
-        (e) => !e.context && e.deal !== "_unmatched"
+        (e) => !e.context || hasNewEvents
       );
       if (eventsNeedingContext.length > 0) {
-        fetchMeetingContexts(eventsNeedingContext, cachedContexts);
+        fetchMeetingContexts(eventsNeedingContext, hasNewEvents ? {} : cachedContexts);
       }
 
       setStatusMsg({ type: "ok", text: `${events.length} meeting${events.length !== 1 ? "s" : ""} deal` });
