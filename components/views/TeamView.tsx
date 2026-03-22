@@ -17,12 +17,12 @@ interface TeamViewProps {
   onChangeDeal: (id: string, deal: string) => void;
   onChangePriority: (id: string, priority: string) => void;
   onChangeAssignee: (id: string, name: string | null) => void;
-  onPushCalendar?: (id: string) => void;
+  onChangeDeadline?: (id: string, deadline: string | null) => void;
 }
 
 export default function TeamView({
   tasks, deals, dealDot, mobile, pushingId, recentAssignees,
-  onToggle, onDelete, onEdit, onChangeDeal, onChangePriority, onChangeAssignee, onPushCalendar,
+  onToggle, onDelete, onEdit, onChangeDeal, onChangePriority, onChangeAssignee, onChangeDeadline,
 }: TeamViewProps) {
   const openTasks = tasks.filter((t) => !t.done);
   const assigned: Record<string, Task[]> = {};
@@ -41,7 +41,7 @@ export default function TeamView({
 
   const taskRowProps = {
     onToggle, onDelete, onEdit, onChangeDeal, onChangePriority,
-    onChangeAssignee, onPushCalendar, pushingId, recentAssignees, mobile, deals, dealDot,
+    onChangeAssignee, onChangeDeadline, pushingId, recentAssignees, mobile, deals, dealDot,
   };
 
   if (people.length === 0 && unassigned.length === 0) {

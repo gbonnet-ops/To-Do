@@ -17,18 +17,18 @@ interface AllViewProps {
   onChangeDeal: (id: string, deal: string) => void;
   onChangePriority: (id: string, priority: string) => void;
   onChangeAssignee: (id: string, name: string | null) => void;
-  onPushCalendar?: (id: string) => void;
+  onChangeDeadline?: (id: string, deadline: string | null) => void;
 }
 
 export default function AllView({
   tasks, showDone, deals, dealDot, mobile, pushingId, recentAssignees,
-  onToggle, onDelete, onEdit, onChangeDeal, onChangePriority, onChangeAssignee, onPushCalendar,
+  onToggle, onDelete, onEdit, onChangeDeal, onChangePriority, onChangeAssignee, onChangeDeadline,
 }: AllViewProps) {
   const display = showDone ? tasks : tasks.filter((t) => !t.done);
 
   const taskRowProps = {
     onToggle, onDelete, onEdit, onChangeDeal, onChangePriority,
-    onChangeAssignee, onPushCalendar, pushingId, recentAssignees, mobile, deals, dealDot,
+    onChangeAssignee, onChangeDeadline, pushingId, recentAssignees, mobile, deals, dealDot,
   };
 
   if (display.filter((t) => !t.done).length === 0 && !showDone) {

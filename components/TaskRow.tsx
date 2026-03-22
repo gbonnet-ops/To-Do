@@ -13,7 +13,7 @@ interface TaskRowProps {
   onChangeDeal: (id: string, deal: string) => void;
   onChangePriority: (id: string, priority: string) => void;
   onChangeAssignee: (id: string, name: string | null) => void;
-  onPushCalendar?: (id: string) => void;
+  onChangeDeadline?: (id: string, deadline: string | null) => void;
   pushingId: string | null;
   recentAssignees: string[];
   mobile: boolean;
@@ -23,7 +23,7 @@ interface TaskRowProps {
 
 export default function TaskRow({
   task, onToggle, onDelete, onEdit, onChangeDeal, onChangePriority,
-  onChangeAssignee, onPushCalendar, pushingId, recentAssignees,
+  onChangeAssignee, onChangeDeadline, pushingId, recentAssignees,
   mobile, deals, dealDot,
 }: TaskRowProps) {
   const [editing, setEditing] = useState(false);
@@ -33,6 +33,7 @@ export default function TaskRow({
   const [priOpen, setPriOpen] = useState(false);
   const [assigneeOpen, setAssigneeOpen] = useState(false);
   const [assigneeInput, setAssigneeInput] = useState(task.assignee || "");
+  const dateRef = useRef<HTMLInputElement>(null);
 
   const lpRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inRef = useRef<HTMLInputElement>(null);
@@ -308,27 +309,22 @@ export default function TaskRow({
               <DealPicker position="right" />
             </div>
 
-            {dl && (
-              <span className="flex-shrink-0" style={{ fontSize: "11px", color: dlC, fontWeight: 500 }}>
-                {dl}
-              </span>
-            )}
-
-            {/* Push to calendar */}
-            {task.deadline && !task.done && (
-              <span
-                onClick={() => !task.synced && onPushCalendar?.(task.id)}
-                className="flex-shrink-0 transition-opacity duration-150"
-                style={{
-                  fontSize: "10px",
-                  cursor: task.synced ? "default" : "pointer",
-                  color: task.synced ? "#34D399" : "#27272A",
-                  opacity: pushingId === task.id ? 0.4 : task.synced ? 0.6 : hovered ? 0.6 : 0,
-                }}
-              >
-                {pushingId === task.id ? "⏳" : task.synced ? "✓📅" : "📅"}
-              </span>
-            )}
+            {/* Date picker */}
+            <span
+              className="flex-shrink-0 cursor-pointer relative"
+              style={{ fontSize: "11px", color: dl ? dlC : "#27272A", fontWeight: dl ? 500 : 400 }}
+              onClick={() => dateRef.current?.showPicker()}
+            >
+              {dl || (hovered && !task.done ? "📅" : "")}
+              <input
+                ref={dateRef}
+                type="date"
+                value={task.deadline || ""}
+                onChange={(e) => onChangeDeadline?.(task.id, e.target.value || null)}
+                className="absolute inset-0 opacity-0 cursor-pointer"
+                style={{ width: "100%", height: "100%", minWidth: "20px" }}
+              />
+            </span>
 
             <div ref={priRef} className="relative flex-shrink-0">
               <span
@@ -397,7 +393,20 @@ export default function TaskRow({
             <DealPicker position="left" />
           </div>
 
-          {dl && <span style={{ fontSize: "11px", color: dlC, fontWeight: 500 }}>{dl}</span>}
+          <span
+            className="cursor-pointer relative"
+            style={{ fontSize: "11px", color: dl ? dlC : "#3F3F46", fontWeight: dl ? 500 : 400 }}
+            onClick={() => dateRef.current?.showPicker()}
+          >
+            {dl || "📅"}
+            <input
+              type="date"
+              value={task.deadline || ""}
+              onChange={(e) => onChangeDeadline?.(task.id, e.target.value || null)}
+              className="absolute inset-0 opacity-0 cursor-pointer"
+              style={{ width: "100%", height: "100%" }}
+            />
+          </span>
 
           <div ref={priRef} className="relative">
             <span
@@ -432,20 +441,6 @@ export default function TaskRow({
             <AssigneePicker position="left" />
           </div>
 
-          {task.deadline && !task.done && (
-            <span
-              onClick={() => !task.synced && onPushCalendar?.(task.id)}
-              className="transition-opacity"
-              style={{
-                fontSize: "11px",
-                cursor: task.synced ? "default" : "pointer",
-                color: task.synced ? "#34D399" : "#3F3F46",
-                opacity: pushingId === task.id ? 0.4 : 1,
-              }}
-            >
-              {pushingId === task.id ? "⏳" : task.synced ? "✓📅" : "📅"}
-            </span>
-          )}
         </div>
       )}
     </div>

@@ -266,6 +266,11 @@ export default function DealFlow() {
     apiUpdateTask(id, { assignee: name || null }).catch(() => {});
   }, []);
 
+  const changeDeadline = useCallback((id: string, deadline: string | null) => {
+    setTasks((p) => p.map((t) => t.id === id ? { ...t, deadline } : t));
+    apiUpdateTask(id, { deadline }).catch(() => {});
+  }, []);
+
   const clearDone = useCallback(() => {
     const doneTasks = tasks.filter((t) => t.done);
     setTasks((p) => p.filter((t) => !t.done));
@@ -375,18 +380,6 @@ export default function DealFlow() {
           <span className="flex-1" />
           {/* Sync buttons */}
           <div className="flex gap-1.5 items-center">
-            <div
-              onClick={!calLoading ? syncCalendar : undefined}
-              className="flex items-center gap-[5px] rounded-md"
-              style={{
-                padding: "4px 10px", fontSize: "11px",
-                cursor: calLoading ? "wait" : "pointer",
-                color: "#818CF8", background: "rgba(129,140,248,0.08)",
-                opacity: calLoading ? 0.5 : 1,
-              }}
-            >
-              {calLoading ? "⏳" : "📅"} {calLoading ? "Sync..." : "Calendar"}
-            </div>
             <div
               onClick={!scanLoading ? scanEmails : undefined}
               className="flex items-center gap-[5px] rounded-md"
@@ -608,7 +601,7 @@ export default function DealFlow() {
                 onChangeDeal={changeDeal}
                 onChangePriority={changePri}
                 onChangeAssignee={changeAssignee}
-                onPushCalendar={pushTaskToCalendar}
+                onChangeDeadline={changeDeadline}
               />
             )}
 
@@ -627,7 +620,7 @@ export default function DealFlow() {
                 onChangeDeal={changeDeal}
                 onChangePriority={changePri}
                 onChangeAssignee={changeAssignee}
-                onPushCalendar={pushTaskToCalendar}
+                onChangeDeadline={changeDeadline}
               />
             )}
           </>
@@ -651,7 +644,7 @@ export default function DealFlow() {
             onChangeDeal={changeDeal}
             onChangePriority={changePri}
             onChangeAssignee={changeAssignee}
-            onPushCalendar={pushTaskToCalendar}
+            onChangeDeadline={changeDeadline}
           />
         )}
 
@@ -670,7 +663,7 @@ export default function DealFlow() {
             onChangeDeal={changeDeal}
             onChangePriority={changePri}
             onChangeAssignee={changeAssignee}
-            onPushCalendar={pushTaskToCalendar}
+            onChangeDeadline={changeDeadline}
           />
         )}
       </div>
