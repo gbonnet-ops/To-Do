@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Task, Deal, CalendarEvent, EmailSuggestion, CompletionSuggestion, StatusMessage, ViewType } from "@/lib/types";
+import { Task, Deal, CalendarEvent, EmailSuggestion, CompletionSuggestion, MeetingPrepSuggestion, StatusMessage, ViewType } from "@/lib/types";
 import { DEFAULT_DEALS } from "@/lib/constants";
 import { uid, todayStr, isOverdue, isToday, greet, getWeekDays, formatDeadline } from "@/lib/utils";
 import {
@@ -10,6 +10,7 @@ import {
   apiAddTask, apiUpdateTask, apiDeleteTask,
   apiAddDeal, apiDeleteDeal,
   loadScannedGmailIds, saveScannedGmailIds,
+  loadSeenCalendarKeys, saveSeenCalendarKeys, calEventKey,
 } from "@/lib/store";
 import QuickAdd from "./QuickAdd";
 import SettingsPanel from "./SettingsPanel";
@@ -48,6 +49,7 @@ export default function DealFlow() {
   const [statusMsg, setStatusMsg] = useState<StatusMessage | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [completionSuggestions, setCompletionSuggestions] = useState<CompletionSuggestion[]>([]);
+  const [meetingPreps, setMeetingPreps] = useState<MeetingPrepSuggestion[]>([]);
   const mobile = useIsMobile();
 
   // Derived
@@ -164,6 +166,28 @@ export default function DealFlow() {
 
       setCalEvents(events);
       setCalLastFetch(new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }));
+
+      // Detect new calendar events
+      const seenKeys = loadSeenCalendarKeys();
+      const seenSet = new Set(seenKeys);
+      const allKeys = events.map((e) => calEventKey(e.title, e.start));
+      const newEvents = events.filter((e) => !seenSet.has(calEventKey(e.title, e.start)));
+
+      if (newEvents.length > 0 && seenKeys.length > 0) {
+        // Only show prep suggestions if we already had a baseline (not first load ever)
+        const preps: MeetingPrepSuggestion[] = newEvents.map((e) => ({
+          eventKey: calEventKey(e.title, e.start),
+          title: e.title,
+          date: e.date,
+          start: e.start,
+          deal: e.deal || null,
+        }));
+        setMeetingPreps(preps);
+      }
+
+      // Save all current event keys as seen
+      saveSeenCalendarKeys(allKeys);
+
       setStatusMsg({ type: "ok", text: `${events.length} meeting${events.length !== 1 ? "s" : ""} deal` });
     } catch (e) {
       setStatusMsg({ type: "error", text: `Calendar: ${e instanceof Error ? e.message : "erreur"}` });
@@ -253,6 +277,24 @@ export default function DealFlow() {
     }
     setCompletionSuggestions([]);
   }, [completionSuggestions]);
+
+  // ── Meeting prep: create prep task from suggestion ──
+  const addPrepTask = useCallback((prep: MeetingPrepSuggestion, prepText: string) => {
+    const id = uid();
+    const task: Task = {
+      id,
+      text: prepText || `Préparer : ${prep.title}`,
+      deal: prep.deal || "Perso",
+      priority: "high",
+      deadline: prep.date,
+      assignee: null,
+      done: false,
+      created_at: new Date().toISOString(),
+    };
+    setTasks((p) => [task, ...p]);
+    setMeetingPreps((p) => p.filter((m) => m.eventKey !== prep.eventKey));
+    apiAddTask({ id, text: task.text, deal: task.deal, priority: task.priority, deadline: task.deadline, assignee: task.assignee, source: "calendar-prep" }).catch(() => {});
+  }, []);
 
   // ── Push task deadline to calendar ──
   const pushTaskToCalendar = useCallback(async (id: string) => {
@@ -528,6 +570,56 @@ export default function DealFlow() {
                 </div>
                 <div
                   onClick={() => setCompletionSuggestions((p) => p.filter((x) => x.taskId !== c.taskId))}
+                  className="cursor-pointer rounded-md"
+                  style={{ padding: "5px 8px", fontSize: "11px", color: "#52525B" }}
+                >
+                  ✕
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ── MEETING PREP SUGGESTIONS ── */}
+        {meetingPreps.length > 0 && (
+          <div
+            className="rounded-[10px] mb-3"
+            style={{
+              background: "rgba(251,191,36,0.05)",
+              border: "1px solid rgba(251,191,36,0.12)",
+              padding: "10px 12px",
+            }}
+          >
+            <div className="flex justify-between items-center mb-2">
+              <span style={{ fontSize: "11px", fontWeight: 500, color: "#FBBF24" }}>
+                📅 {meetingPreps.length} nouveau{meetingPreps.length > 1 ? "x" : ""} meeting{meetingPreps.length > 1 ? "s" : ""} — action à prévoir ?
+              </span>
+              <span onClick={() => setMeetingPreps([])} className="cursor-pointer" style={{ fontSize: "10px", color: "#52525B" }}>
+                Ignorer tout
+              </span>
+            </div>
+            {meetingPreps.map((m, i) => (
+              <div
+                key={m.eventKey}
+                className="flex items-center gap-2"
+                style={{ padding: "8px 0", borderTop: i > 0 ? "1px solid rgba(255,255,255,0.03)" : "none" }}
+              >
+                <div className="flex-1 min-w-0">
+                  <div style={{ fontSize: "13px", color: "#CBD5E1", marginBottom: "3px" }}>{m.title}</div>
+                  <div className="flex gap-1.5 items-center">
+                    {m.deal && <span style={{ fontSize: "10px", color: DEAL_DOT[m.deal] || "#64748B" }}>{m.deal}</span>}
+                    <span style={{ fontSize: "10px", color: "#FBBF24" }}>{formatDeadline(m.date)}</span>
+                  </div>
+                </div>
+                <div
+                  onClick={() => addPrepTask(m, "")}
+                  className="cursor-pointer rounded-md"
+                  style={{ padding: "5px 10px", fontSize: "11px", color: "#FBBF24", background: "rgba(251,191,36,0.1)" }}
+                >
+                  + Préparer
+                </div>
+                <div
+                  onClick={() => setMeetingPreps((p) => p.filter((x) => x.eventKey !== m.eventKey))}
                   className="cursor-pointer rounded-md"
                   style={{ padding: "5px 8px", fontSize: "11px", color: "#52525B" }}
                 >

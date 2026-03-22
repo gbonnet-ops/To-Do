@@ -51,4 +51,12 @@ export interface CompletionSuggestion {
   reason: string;
 }
 
+export interface MeetingPrepSuggestion {
+  eventKey: string; // unique key: title+start
+  title: string;
+  date: string;
+  start: string;
+  deal: string | null;
+}
+
 export type ViewType = "focus" | "all" | "week" | "team";

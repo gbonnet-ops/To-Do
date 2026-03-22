@@ -150,6 +150,46 @@ export const saveScannedGmailIds = (ids: string[]) => {
   }
 };
 
+// ── Calendar event memory (detect new meetings) ──
+
+const CAL_SEEN_KEY = "dealflow-cal-seen";
+
+interface CalSeenData {
+  date: string; // YYYY-MM-DD of last update
+  keys: string[]; // unique event keys (title|start)
+}
+
+export const calEventKey = (title: string, start: string): string =>
+  `${title}|${start}`;
+
+export const loadSeenCalendarKeys = (): string[] => {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(CAL_SEEN_KEY);
+    if (!raw) return [];
+    const data: CalSeenData = JSON.parse(raw);
+    const today = new Date().toISOString().slice(0, 10);
+    const yesterday = yesterdayStr();
+    if (data.date !== today && data.date !== yesterday) {
+      localStorage.removeItem(CAL_SEEN_KEY);
+      return [];
+    }
+    return data.keys;
+  } catch {
+    return [];
+  }
+};
+
+export const saveSeenCalendarKeys = (keys: string[]) => {
+  if (typeof window === "undefined") return;
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    localStorage.setItem(CAL_SEEN_KEY, JSON.stringify({ date: today, keys }));
+  } catch (e) {
+    console.error("Save seen calendar keys failed:", e);
+  }
+};
+
 export const apiDeleteDeal = async (name: string) => {
   const res = await fetch(`/api/deals?name=${encodeURIComponent(name)}`, {
     method: "DELETE",
