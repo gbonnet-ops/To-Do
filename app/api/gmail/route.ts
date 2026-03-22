@@ -79,10 +79,10 @@ export async function POST(request: Request) {
     })
   );
 
-  // Send to Claude API for task extraction
-  const anthropicKey = process.env.ANTHROPIC_API_KEY;
-  if (!anthropicKey) {
-    return NextResponse.json({ error: "ANTHROPIC_API_KEY not configured" }, { status: 500 });
+  // Send to OpenAI API for task extraction
+  const openaiKey = process.env.OPENAI_API_KEY;
+  if (!openaiKey) {
+    return NextResponse.json({ error: "OPENAI_API_KEY not configured" }, { status: 500 });
   }
 
   const existingDesc = existingTasks.slice(0, 15).join("; ");
@@ -90,19 +90,7 @@ export async function POST(request: Request) {
     .map((m, i) => `Email ${i + 1}:\nFrom: ${m.from}\nSubject: ${m.subject}\nBody: ${m.body}\n---`)
     .join("\n");
 
-  const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": anthropicKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 2048,
-      messages: [{
-        role: "user",
-        content: `Analyze these emails and extract actionable tasks/follow-ups.
+  const prompt = `Analyze these emails and extract actionable tasks/follow-ups.
 
 Existing tasks (don't duplicate): ${existingDesc}
 
@@ -118,23 +106,30 @@ Return ONLY a valid JSON array where each suggested task has:
 - "assignee": person name or null
 - "source": email subject line (short)
 
-Only include actionable items. Max 8 suggestions. No markdown, no explanation, just JSON array. If no tasks found, return [].`,
-      }],
+Only include actionable items. Max 8 suggestions. No markdown, no explanation, just JSON array. If no tasks found, return [].`;
+
+  const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${openaiKey}`,
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      max_tokens: 2048,
+      messages: [{ role: "user", content: prompt }],
     }),
   });
 
-  if (!claudeRes.ok) {
-    const err = await claudeRes.text().catch(() => "");
-    return NextResponse.json({ error: `Claude API: ${err.slice(0, 200)}` }, { status: 500 });
+  if (!openaiRes.ok) {
+    const err = await openaiRes.text().catch(() => "");
+    return NextResponse.json({ error: `OpenAI API: ${err.slice(0, 200)}` }, { status: 500 });
   }
 
-  const claudeData = await claudeRes.json();
-  const textContent = (claudeData.content || [])
-    .filter((b: { type: string }) => b.type === "text")
-    .map((b: { text: string }) => b.text)
-    .join("");
+  const openaiData = await openaiRes.json();
+  const textContent = openaiData.choices?.[0]?.message?.content || "";
 
-  // Parse JSON from Claude's response
+  // Parse JSON from OpenAI's response
   try {
     const cleaned = textContent.replace(/```json|```/g, "").trim();
     const start = cleaned.search(/[\[{]/);
