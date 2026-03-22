@@ -68,7 +68,8 @@ export const formatDeadline = (d: string | null) => {
 export const deadlineColor = (d: string | null) => {
   if (!d) return "#475569";
   if (d < todayStr()) return "#F87171";
-  if (d === todayStr()) return "#FBBF24";
+  if (d === todayStr()) return "#FF6B6B";
+  if (d === tomorrowStr()) return "#FB923C";
   return "#64748B";
 };
 
