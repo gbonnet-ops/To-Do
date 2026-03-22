@@ -52,17 +52,26 @@ export async function POST(request: Request) {
   const twoWeeksAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 14);
   const afterEpoch = Math.floor(twoWeeksAgo.getTime() / 1000);
 
+  const STOPWORDS = new Set([
+    "meeting", "call", "point", "weekly", "daily", "sync", "standup",
+    "review", "discussion", "team", "mail", "intern", "interne", "externe",
+    "the", "and", "les", "des", "pour", "avec", "par", "sur", "pas",
+    "réunion", "prep", "prépa", "debrief", "catch", "update", "check",
+    "management", "staffing", "entretien", "agenda",
+  ]);
+
   for (const event of events.slice(0, 10)) {
     const words = event.title
       .replace(/[^a-zA-ZÀ-ÿ0-9\s]/g, " ")
       .split(/\s+/)
-      .filter((w) => w.length > 2)
+      .filter((w) => w.length > 2 && !STOPWORDS.has(w.toLowerCase()))
       .slice(0, 4);
 
     if (words.length === 0) continue;
 
     try {
-      const query = `after:${afterEpoch} {${words.join(" ")}}`;
+      // Use AND (no curly braces) so ALL keywords must match, not just one
+      const query = `after:${afterEpoch} ${words.join(" ")}`;
       const searchData = await googleFetch(
         `https://www.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=5`,
         tokens

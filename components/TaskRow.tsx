@@ -149,7 +149,7 @@ export default function TaskRow({
     ) : null
   );
 
-  const AssigneePicker = ({ position }: { position: "right" | "left" }) => (
+  const renderAssigneePicker = (position: "right" | "left") => (
     assigneeOpen ? (
       <div
         className="absolute z-60 rounded-lg p-1.5 min-w-[150px]"
@@ -355,7 +355,7 @@ export default function TaskRow({
               >
                 {task.assignee || "+"}
               </span>
-              <AssigneePicker position="right" />
+              {renderAssigneePicker("right")}
             </div>
           </>
         )}
@@ -438,7 +438,7 @@ export default function TaskRow({
             >
               {task.assignee || "👤"}
             </span>
-            <AssigneePicker position="left" />
+            {renderAssigneePicker("left")}
           </div>
 
         </div>
