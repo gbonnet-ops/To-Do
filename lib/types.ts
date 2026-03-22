@@ -31,6 +31,8 @@ export interface CalendarEvent {
   location: string | null;
   deal?: string | null;
   context?: string | null;
+  agenda?: string[] | null;
+  documents?: string[] | null;
   attendees?: string[];
 }
 

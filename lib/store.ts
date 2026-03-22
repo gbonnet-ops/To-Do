@@ -205,12 +205,18 @@ export const saveSeenCalendarKeys = (keys: string[]) => {
 
 const CAL_CONTEXT_KEY = "dealflow-cal-context";
 
-interface CalContextCache {
-  date: string;
-  contexts: Record<string, string>; // eventKey -> context summary
+export interface MeetingContextData {
+  context: string;
+  agenda?: string[];
+  documents?: string[];
 }
 
-export const loadCalContexts = (): Record<string, string> => {
+interface CalContextCache {
+  date: string;
+  contexts: Record<string, MeetingContextData>;
+}
+
+export const loadCalContexts = (): Record<string, MeetingContextData> => {
   if (typeof window === "undefined") return {};
   try {
     const raw = localStorage.getItem(CAL_CONTEXT_KEY);
@@ -222,13 +228,22 @@ export const loadCalContexts = (): Record<string, string> => {
       localStorage.removeItem(CAL_CONTEXT_KEY);
       return {};
     }
-    return data.contexts;
+    // Migrate old string format to new object format
+    const contexts: Record<string, MeetingContextData> = {};
+    for (const [key, val] of Object.entries(data.contexts)) {
+      if (typeof val === "string") {
+        contexts[key] = { context: val };
+      } else {
+        contexts[key] = val as MeetingContextData;
+      }
+    }
+    return contexts;
   } catch {
     return {};
   }
 };
 
-export const saveCalContexts = (contexts: Record<string, string>) => {
+export const saveCalContexts = (contexts: Record<string, MeetingContextData>) => {
   if (typeof window === "undefined") return;
   try {
     const today = new Date().toISOString().slice(0, 10);

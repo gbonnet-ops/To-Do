@@ -11,7 +11,7 @@ import {
   apiAddDeal, apiUpdateDeal, apiDeleteDeal,
   loadScannedGmailIds, saveScannedGmailIds,
   loadSeenCalendarKeys, saveSeenCalendarKeys, calEventKey,
-  loadCalContexts, saveCalContexts,
+  loadCalContexts, saveCalContexts, MeetingContextData,
 } from "@/lib/store";
 import QuickAdd from "./QuickAdd";
 import SettingsPanel from "./SettingsPanel";
@@ -184,7 +184,14 @@ export default function DealFlow() {
       const cachedContexts = loadCalContexts();
       const eventsWithContext = events.map((e) => {
         const key = calEventKey(e.title, e.start);
-        return cachedContexts[key] ? { ...e, context: cachedContexts[key] } : e;
+        const cached = cachedContexts[key];
+        if (!cached) return e;
+        return {
+          ...e,
+          context: cached.context,
+          agenda: cached.agenda || null,
+          documents: cached.documents || null,
+        };
       });
 
       setCalEvents(eventsWithContext);
@@ -223,7 +230,7 @@ export default function DealFlow() {
   }, [weekOffset]);
 
   // ── Fetch meeting contexts from emails (background, non-blocking) ──
-  const fetchMeetingContexts = useCallback(async (events: CalendarEvent[], existingContexts: Record<string, string>) => {
+  const fetchMeetingContexts = useCallback(async (events: CalendarEvent[], existingContexts: Record<string, MeetingContextData>) => {
     try {
       const eventsToFetch = events.map((e) => ({
         key: calEventKey(e.title, e.start),
@@ -239,7 +246,16 @@ export default function DealFlow() {
       });
       if (!res.ok) return;
       const data = await res.json();
-      const newContexts: Record<string, string> = data.contexts || {};
+      const rawContexts: Record<string, MeetingContextData | string> = data.contexts || {};
+      // Normalize: API may return objects or legacy strings
+      const newContexts: Record<string, MeetingContextData> = {};
+      for (const [key, val] of Object.entries(rawContexts)) {
+        if (typeof val === "string") {
+          newContexts[key] = { context: val };
+        } else {
+          newContexts[key] = val as MeetingContextData;
+        }
+      }
       if (Object.keys(newContexts).length === 0) return;
 
       // Merge with existing contexts and save
@@ -250,7 +266,14 @@ export default function DealFlow() {
       setCalEvents((prev) =>
         prev.map((e) => {
           const key = calEventKey(e.title, e.start);
-          return newContexts[key] ? { ...e, context: newContexts[key] } : e;
+          const ctx = newContexts[key];
+          if (!ctx) return e;
+          return {
+            ...e,
+            context: ctx.context,
+            agenda: ctx.agenda || null,
+            documents: ctx.documents || null,
+          };
         })
       );
     } catch {
@@ -280,12 +303,26 @@ export default function DealFlow() {
         });
         if (res.ok) {
           const data = await res.json();
-          const newContexts: Record<string, string> = data.contexts || {};
+          const rawContexts: Record<string, MeetingContextData | string> = data.contexts || {};
+          const newContexts: Record<string, MeetingContextData> = {};
+          for (const [key, val] of Object.entries(rawContexts)) {
+            if (typeof val === "string") {
+              newContexts[key] = { context: val };
+            } else {
+              newContexts[key] = val as MeetingContextData;
+            }
+          }
           saveCalContexts(newContexts);
           setCalEvents((prev) =>
             prev.map((e) => {
               const key = calEventKey(e.title, e.start);
-              return { ...e, context: newContexts[key] || null };
+              const ctx = newContexts[key];
+              return {
+                ...e,
+                context: ctx?.context || null,
+                agenda: ctx?.agenda || null,
+                documents: ctx?.documents || null,
+              };
             })
           );
         }

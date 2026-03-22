@@ -16,9 +16,31 @@ export default function MeetingCard({ event, dotColor, mobile, onDeepContext }: 
   const [deepLoading, setDeepLoading] = useState(false);
   const [deepContext, setDeepContext] = useState<string | null>(null);
 
+  const contextBlock = (
+    <>
+      {event.context && <div>{event.context}</div>}
+      {event.agenda && event.agenda.length > 0 && (
+        <div style={{ marginTop: event.context ? "4px" : 0 }}>
+          <span style={{ fontSize: "10px", fontWeight: 600, color: "#818CF8", textTransform: "uppercase", letterSpacing: "0.5px" }}>Agenda</span>
+          <ul style={{ margin: "2px 0 0", paddingLeft: "14px", listStyleType: "disc" }}>
+            {event.agenda.map((a, i) => <li key={i}>{a}</li>)}
+          </ul>
+        </div>
+      )}
+      {event.documents && event.documents.length > 0 && (
+        <div style={{ marginTop: "4px" }}>
+          <span style={{ fontSize: "10px", fontWeight: 600, color: "#FBBF24", textTransform: "uppercase", letterSpacing: "0.5px" }}>Documents à fournir</span>
+          <ul style={{ margin: "2px 0 0", paddingLeft: "14px", listStyleType: "disc" }}>
+            {event.documents.map((d, i) => <li key={i}>{d}</li>)}
+          </ul>
+        </div>
+      )}
+    </>
+  );
+
   const st = event.start ? new Date(event.start).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "";
   const en = event.end ? new Date(event.end).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "";
-  const hasContext = !!event.context;
+  const hasContext = !!event.context || (event.agenda && event.agenda.length > 0) || (event.documents && event.documents.length > 0);
   const hasDeal = event.deal && event.deal !== "_unmatched";
   const showContext = hasContext && (mobile ? expanded : hovered);
   const showDeep = deepContext !== null;
@@ -108,7 +130,7 @@ export default function MeetingCard({ event, dotColor, mobile, onDeepContext }: 
               lineHeight: "1.4",
             }}
           >
-            {event.context}
+            {contextBlock}
           </div>
         )}
 
@@ -151,7 +173,7 @@ export default function MeetingCard({ event, dotColor, mobile, onDeepContext }: 
               whiteSpace: "normal",
             }}
           >
-            {event.context}
+            {contextBlock}
           </div>
         )}
       </div>

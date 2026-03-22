@@ -255,17 +255,23 @@ export async function POST(request: Request) {
     return `Meeting "${event?.title}"${dealInfo} (key: ${key}):\n${msgText}`;
   }).join("\n\n");
 
-  const prompt = `Pour chaque meeting ci-dessous, génère un résumé de contexte court (max 200 caractères) basé UNIQUEMENT sur les échanges email/Slack fournis. Résume ce qui a été discuté concrètement, pas le sujet général du projet.
+  const prompt = `Pour chaque meeting ci-dessous, analyse les échanges email/Slack fournis et extrais les informations pertinentes.
 
 ${eventSummaries}
 
+Pour chaque meeting, génère un objet JSON avec ces champs :
+- "context": résumé court (max 200 caractères) de ce qui a été discuté concrètement
+- "agenda": liste des sujets/discussions prévus pour ce meeting, extraits des échanges (tableau de strings). Omets ce champ si aucun agenda n'est mentionné.
+- "documents": liste des documents à fournir/préparer pour ce meeting, extraits des échanges (tableau de strings). Omets ce champ si aucun document n'est mentionné.
+
 RÈGLES CRITIQUES:
-- Base-toi uniquement sur le contenu réel des messages, pas sur des suppositions.
+- Base-toi UNIQUEMENT sur le contenu réel des messages, pas sur des suppositions.
 - Si un meeting est associé à un projet (ex: "Otrera"), IGNORE les messages qui parlent d'un AUTRE projet (ex: "Darwin", "Nova", etc.). Ne mélange JAMAIS les projets.
 - Si les messages fournis ne sont pas pertinents au meeting ou parlent d'un autre projet, ne pas inclure la clé dans le résultat.
+- N'invente JAMAIS d'agenda ou de documents. Ne les inclus que s'ils sont explicitement mentionnés dans les messages.
 
-Return ONLY a valid JSON object where keys are the meeting keys and values are the short context strings in French.
-Example: {"title|2025-03-20T10:00:00": "Jean demande validation du contrat avant vendredi"}
+Return ONLY a valid JSON object where keys are the meeting keys and values are objects with the fields above.
+Example: {"title|2025-03-20T10:00:00": {"context": "Jean demande validation du contrat avant vendredi", "agenda": ["Revue du contrat", "Pricing final"], "documents": ["Contrat v3 signé"]}}
 
 No markdown, just JSON object.`;
 
