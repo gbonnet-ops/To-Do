@@ -69,6 +69,12 @@ function projectEmail(dealName: string | null | undefined): string | null {
   return slug ? `${slug}@clipperton.net` : null;
 }
 
+/** Extract email addresses from From/To/Cc headers */
+function extractEmails(header: string): string[] {
+  const matches = header.match(/[\w.+-]+@[\w.-]+\.\w+/g);
+  return matches || [];
+}
+
 // POST /api/calendar/context/deep — Generate a detailed context for a single meeting
 export async function POST(request: Request) {
   const supabase = await createServerSupabaseClient();
@@ -180,6 +186,8 @@ export async function POST(request: Request) {
   }
 
   // Execute Gmail queries
+  const projectParticipants = new Set<string>();
+
   for (const { query, max } of gmailQueries) {
     if (seenIds.size >= 12) break; // enough total context
     try {
@@ -204,14 +212,23 @@ export async function POST(request: Request) {
             date: getHeader(detail, "Date"),
             body: extractBody(detail).slice(0, 800),
           });
+          // Collect participants from email threads (especially project email ones)
+          for (const hdr of ["From", "To", "Cc"]) {
+            for (const email of extractEmails(getHeader(detail, hdr))) {
+              if (email !== projEmail) projectParticipants.add(email);
+            }
+          }
         } catch { /* skip */ }
       }
     } catch { /* skip */ }
   }
 
+  // Merge calendar attendees + participants discovered from project email threads
+  const allParticipants = [...new Set([...attendees, ...projectParticipants])];
+
   // Slack search — smart channel + DM + keyword strategy
   if (slackTokens) {
-    const names = attendeeNames(attendees);
+    const names = attendeeNames(allParticipants);
 
     try {
       const slackResults = await searchSlackWithContext(slackTokens, {
@@ -244,8 +261,8 @@ export async function POST(request: Request) {
     })
     .join("\n\n");
 
-  const attendeeInfo = attendees.length > 0
-    ? `\nParticipants du meeting: ${attendees.join(", ")}`
+  const attendeeInfo = allParticipants.length > 0
+    ? `\nParticipants et contacts projet: ${allParticipants.join(", ")}`
     : "";
 
   const dealInfo = deal && deal !== "_unmatched"

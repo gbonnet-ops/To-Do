@@ -62,6 +62,12 @@ function projectEmail(dealName: string | null): string | null {
   return slug ? `${slug}@clipperton.net` : null;
 }
 
+/** Extract email addresses from From/To/Cc headers */
+function extractEmails(header: string): string[] {
+  const matches = header.match(/[\w.+-]+@[\w.-]+\.\w+/g);
+  return matches || [];
+}
+
 /** Extract first name or short identifier from email for Slack search */
 function attendeeNames(attendees: string[]): string[] {
   return attendees
@@ -155,6 +161,8 @@ export async function POST(request: Request) {
     }
 
     const seenIds = new Set<string>();
+    // Collect participants discovered from project email threads
+    const projectParticipants = new Set<string>();
 
     for (const query of gmailQueries) {
       if (seenIds.size >= 4) break; // enough context per event
@@ -179,15 +187,24 @@ export async function POST(request: Request) {
               from: getHeader(detail, "From"),
               body: extractBody(detail).slice(0, 400),
             });
+            // Collect participants from project email threads
+            for (const hdr of ["From", "To", "Cc"]) {
+              for (const email of extractEmails(getHeader(detail, hdr))) {
+                if (email !== projEmail) projectParticipants.add(email);
+              }
+            }
           } catch { /* skip */ }
         }
       } catch { /* skip */ }
     }
 
+    // Merge calendar attendees + project email participants for Slack search
+    const allParticipants = [...new Set([...attendees, ...projectParticipants])];
+
     // Slack search: channels + DMs + keyword fallback
     if (slackTokens) {
       try {
-        const names = attendeeNames(attendees);
+        const names = attendeeNames(allParticipants);
         const slackResults = await searchSlackWithContext(slackTokens, {
           keywords: allKeywords,
           dealName: dealName,
