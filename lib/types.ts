@@ -63,4 +63,4 @@ export interface MeetingPrepSuggestion {
   source: string;
 }
 
-export type ViewType = "focus" | "all" | "week" | "team";
+export type ViewType = "focus" | "all" | "week" | "team" | "recap";

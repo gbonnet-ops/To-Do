@@ -168,7 +168,7 @@ export default function WeekView({
                   )}
                 </div>
                 {dayMeetings.length > 0 && (
-                  <div className="w-[280px] flex-shrink-0" style={{ borderLeft: "1px solid rgba(255,255,255,0.04)", paddingLeft: "12px" }}>
+                  <div className="w-[380px] flex-shrink-0" style={{ borderLeft: "1px solid rgba(255,255,255,0.04)", paddingLeft: "16px" }}>
                     {dayMeetings.map((e, i) => {
                       const evDot = e.deal && e.deal !== "_unmatched" ? dealDot[e.deal] || "#64748B" : "#3F3F46";
                       return (

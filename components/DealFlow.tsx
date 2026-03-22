@@ -19,6 +19,7 @@ import FocusView from "./views/FocusView";
 import AllView from "./views/AllView";
 import WeekView from "./views/WeekView";
 import TeamView from "./views/TeamView";
+import RecapView from "./views/RecapView";
 
 function useIsMobile() {
   const [m, setM] = useState(false);
@@ -46,6 +47,8 @@ export default function DealFlow() {
   const [calLastFetch, setCalLastFetch] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<EmailSuggestion[]>([]);
   const [scanLoading, setScanLoading] = useState(false);
+  const [slackConnected, setSlackConnected] = useState(false);
+  const [slackScanLoading, setSlackScanLoading] = useState(false);
   const [pushingId, setPushingId] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<StatusMessage | null>(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -128,6 +131,10 @@ export default function DealFlow() {
         checkCompletions(result.tasks);
       }
     });
+    // Check Slack connection status
+    fetch("/api/slack/status").then((r) => r.json()).then((d) => {
+      setSlackConnected(!!d.connected);
+    }).catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadFromApi]);
 
@@ -283,42 +290,67 @@ export default function DealFlow() {
     setTimeout(() => setStatusMsg(null), 5000);
   }, [calEvents, calLoading]);
 
-  // ── Gmail scan ──
+  // ── Gmail + Slack scan ──
   const scanEmails = useCallback(async () => {
     setScanLoading(true);
-    setStatusMsg({ type: "info", text: "Scan Gmail en cours..." });
+    setStatusMsg({ type: "info", text: "Scan Gmail + Slack en cours..." });
     try {
       const scannedIds = loadScannedGmailIds();
-      const res = await fetch("/api/gmail", {
+      const openTaskTexts = tasks.filter((t) => !t.done).slice(0, 15).map((t) => t.text);
+
+      // Run Gmail + Slack scans in parallel
+      const gmailPromise = fetch("/api/gmail", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          existingTasks: tasks.filter((t) => !t.done).slice(0, 15).map((t) => t.text),
-          dealNames: DEALS,
-          scannedIds,
-        }),
+        body: JSON.stringify({ existingTasks: openTaskTexts, dealNames: DEALS, scannedIds }),
       });
-      if (!res.ok) throw new Error(`Gmail API: ${res.status}`);
-      const data = await res.json();
-      // New format: { suggestions, scannedIds }
-      const results: EmailSuggestion[] = data.suggestions || data;
-      if (data.scannedIds) {
-        saveScannedGmailIds(data.scannedIds);
+      const slackPromise = slackConnected
+        ? fetch("/api/slack/scan", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ existingTasks: openTaskTexts, dealNames: DEALS }),
+          })
+        : null;
+
+      const [gmailRes, slackRes] = await Promise.all([gmailPromise, slackPromise]);
+
+      const allResults: EmailSuggestion[] = [];
+
+      // Process Gmail results
+      if (gmailRes.ok) {
+        const data = await gmailRes.json();
+        const results: EmailSuggestion[] = data.suggestions || data;
+        if (data.scannedIds) saveScannedGmailIds(data.scannedIds);
+        allResults.push(...results);
       }
-      // Deduplicate: remove Gmail suggestions that overlap with existing meeting prep suggestions
+
+      // Process Slack results
+      if (slackRes && slackRes.ok) {
+        const data = await slackRes.json();
+        const results: EmailSuggestion[] = data.suggestions || [];
+        allResults.push(...results);
+      }
+
+      // Deduplicate: remove suggestions that overlap with existing meeting prep suggestions or each other
       const prepTexts = new Set(meetingPreps.map((p) => p.text.toLowerCase()));
-      const deduped = results.filter((s) => !prepTexts.has(s.text.toLowerCase()));
+      const seenTexts = new Set<string>();
+      const deduped = allResults.filter((s) => {
+        const lower = s.text.toLowerCase();
+        if (prepTexts.has(lower) || seenTexts.has(lower)) return false;
+        seenTexts.add(lower);
+        return true;
+      });
       setSuggestions(deduped);
       setStatusMsg(deduped.length > 0
-        ? { type: "ok", text: `${results.length} suggestion${results.length > 1 ? "s" : ""} trouvée${results.length > 1 ? "s" : ""}` }
+        ? { type: "ok", text: `${deduped.length} suggestion${deduped.length > 1 ? "s" : ""} trouvée${deduped.length > 1 ? "s" : ""}` }
         : { type: "ok", text: "Aucune nouvelle tâche détectée" }
       );
     } catch (e) {
-      setStatusMsg({ type: "error", text: `Gmail: ${e instanceof Error ? e.message : "erreur"}` });
+      setStatusMsg({ type: "error", text: `Scan: ${e instanceof Error ? e.message : "erreur"}` });
     }
     setScanLoading(false);
     setTimeout(() => setStatusMsg(null), 5000);
-  }, [tasks, DEALS, meetingPreps]);
+  }, [tasks, DEALS, meetingPreps, slackConnected]);
 
   // ── Accept/dismiss suggestions ──
   const acceptSuggestion = useCallback((idx: number) => {
@@ -506,9 +538,31 @@ export default function DealFlow() {
   }, []);
 
   const changeAssignee = useCallback((id: string, name: string | null) => {
-    setTasks((p) => p.map((t) => t.id === id ? { ...t, assignee: name || null } : t));
+    setTasks((p) => {
+      const task = p.find((t) => t.id === id);
+      // Send Slack DM if assigning to someone new
+      if (name && task && task.assignee !== name && slackConnected) {
+        fetch("/api/slack/notify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            assigneeName: name,
+            taskText: task.text,
+            dealName: task.deal !== "Perso" ? task.deal : null,
+            priority: task.priority,
+            deadline: task.deadline,
+          }),
+        }).then((r) => r.json()).then((d) => {
+          if (d.sent) {
+            setStatusMsg({ type: "ok", text: `Notifié ${d.user} sur Slack` });
+            setTimeout(() => setStatusMsg(null), 3000);
+          }
+        }).catch(() => {});
+      }
+      return p.map((t) => t.id === id ? { ...t, assignee: name || null } : t);
+    });
     apiUpdateTask(id, { assignee: name || null }).catch(() => {});
-  }, []);
+  }, [slackConnected]);
 
   const changeDeadline = useCallback((id: string, deadline: string | null) => {
     setTasks((p) => p.map((t) => t.id === id ? { ...t, deadline } : t));
@@ -643,6 +697,19 @@ export default function DealFlow() {
             >
               {scanLoading ? "⏳" : "📧"} {scanLoading ? "Scan..." : "Gmail"}
             </div>
+            {slackConnected && (
+              <div
+                className="flex items-center gap-[5px] rounded-md"
+                style={{
+                  padding: "4px 10px", fontSize: "11px",
+                  color: slackConnected ? "#818CF8" : "#3F3F46",
+                  background: "rgba(129,140,248,0.08)",
+                }}
+                title="Slack connecté — inclus dans le scan Gmail"
+              >
+                💬 Slack
+              </div>
+            )}
             {calLastFetch && <span style={{ fontSize: "9px", color: "#27272A" }}>màj {calLastFetch}</span>}
           </div>
         </div>
@@ -866,6 +933,7 @@ export default function DealFlow() {
             { k: "all" as ViewType, l: "Toutes", c: filtered.filter((t) => !t.done).length },
             { k: "week" as ViewType, l: "Semaine" },
             { k: "team" as ViewType, l: "Équipe" },
+            { k: "recap" as ViewType, l: "Récap" },
           ].map(({ k, l, c }) => (
             <div
               key={k}
@@ -1031,6 +1099,14 @@ export default function DealFlow() {
             onChangePriority={changePri}
             onChangeAssignee={changeAssignee}
             onChangeDeadline={changeDeadline}
+          />
+        )}
+
+        {/* Recap view */}
+        {view === "recap" && (
+          <RecapView
+            deals={deals}
+            mobile={mobile}
           />
         )}
       </div>
