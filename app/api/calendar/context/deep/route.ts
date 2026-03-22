@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getGoogleTokens, googleFetch } from "@/lib/google";
+import { getSlackTokens, searchSlackMessages } from "@/lib/slack";
 
 interface GmailMessageDetail {
   id: string;
@@ -38,35 +39,35 @@ function getHeader(msg: GmailMessageDetail, name: string): string {
   return msg.payload?.headers?.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value || "";
 }
 
+const STOPWORDS = new Set([
+  "meeting", "call", "point", "weekly", "daily", "sync", "standup",
+  "review", "discussion", "team", "mail", "intern", "interne", "externe",
+  "the", "and", "les", "des", "pour", "avec", "par", "sur", "pas",
+  "réunion", "prep", "prépa", "debrief", "catch", "update", "check",
+  "management", "staffing", "entretien", "agenda",
+]);
+
 // POST /api/calendar/context/deep — Generate a detailed context for a single meeting
 export async function POST(request: Request) {
   const tokens = await getGoogleTokens();
   if (!tokens) return NextResponse.json({ error: "No Google tokens" }, { status: 401 });
 
+  const slackTokens = await getSlackTokens();
+
   const body = await request.json();
-  const { key, title, deal } = body as { key: string; title: string; deal?: string };
+  const { title, deal } = body as { key: string; title: string; deal?: string };
 
   if (!title) return NextResponse.json({ error: "Missing title" }, { status: 400 });
 
   const openaiKey = process.env.OPENAI_API_KEY;
   if (!openaiKey) return NextResponse.json({ error: "OPENAI_API_KEY not configured" }, { status: 500 });
 
-  const STOPWORDS = new Set([
-    "meeting", "call", "point", "weekly", "daily", "sync", "standup",
-    "review", "discussion", "team", "mail", "intern", "interne", "externe",
-    "the", "and", "les", "des", "pour", "avec", "par", "sur", "pas",
-    "réunion", "prep", "prépa", "debrief", "catch", "update", "check",
-    "management", "staffing", "entretien", "agenda",
-  ]);
-
-  // Extract keywords from title
   const titleWords = title
     .replace(/[^a-zA-ZÀ-ÿ0-9\s]/g, " ")
     .split(/\s+/)
     .filter((w) => w.length > 2 && !STOPWORDS.has(w.toLowerCase()))
     .slice(0, 5);
 
-  // Also use deal name as keyword if available
   const dealWords = deal && deal !== "_unmatched"
     ? deal.replace(/[^a-zA-ZÀ-ÿ0-9\s]/g, " ").split(/\s+/).filter((w) => w.length > 2)
     : [];
@@ -74,15 +75,15 @@ export async function POST(request: Request) {
   const searchTerms = [...new Set([...titleWords, ...dealWords])];
   if (searchTerms.length === 0) return NextResponse.json({ context: null });
 
-  // Search further back (4 weeks) and get more results
   const now = new Date();
   const fourWeeksAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 28);
   const afterEpoch = Math.floor(fourWeeksAgo.getTime() / 1000);
 
-  const allEmails: Array<{ subject: string; from: string; date: string; body: string }> = [];
+  // Collect all sources
+  const allSources: Array<{ source: string; from: string; date: string; subject: string; body: string }> = [];
 
+  // Gmail search
   try {
-    // Do two searches: one with title keywords, one with deal name
     const queries = [
       searchTerms.length > 0 ? `after:${afterEpoch} ${searchTerms.join(" ")}` : null,
       dealWords.length > 0 && titleWords.length > 0 ? `after:${afterEpoch} ${dealWords.join(" ")}` : null,
@@ -106,7 +107,8 @@ export async function POST(request: Request) {
             `https://www.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=full`,
             tokens
           );
-          allEmails.push({
+          allSources.push({
+            source: "email",
             subject: getHeader(detail, "Subject"),
             from: getHeader(detail, "From"),
             date: getHeader(detail, "Date"),
@@ -121,17 +123,58 @@ export async function POST(request: Request) {
     // skip
   }
 
-  if (allEmails.length === 0) return NextResponse.json({ context: null });
+  // Slack search
+  if (slackTokens) {
+    try {
+      // Search with title keywords
+      const slackResults = await searchSlackMessages(slackTokens, searchTerms, 8);
+      for (const msg of slackResults) {
+        allSources.push({
+          source: "slack",
+          from: msg.from,
+          date: msg.date,
+          subject: `#${msg.channel}`,
+          body: msg.text.slice(0, 600),
+        });
+      }
 
-  const emailText = allEmails
-    .map((m, i) => `Email ${i + 1}:\n  De: ${m.from}\n  Date: ${m.date}\n  Sujet: ${m.subject}\n  Contenu: ${m.body}`)
+      // Also search with deal name alone if different from title keywords
+      if (dealWords.length > 0) {
+        const dealResults = await searchSlackMessages(slackTokens, dealWords, 5);
+        const existingTexts = new Set(allSources.filter((s) => s.source === "slack").map((s) => s.body));
+        for (const msg of dealResults) {
+          if (!existingTexts.has(msg.text.slice(0, 600))) {
+            allSources.push({
+              source: "slack",
+              from: msg.from,
+              date: msg.date,
+              subject: `#${msg.channel}`,
+              body: msg.text.slice(0, 600),
+            });
+          }
+        }
+      }
+    } catch {
+      // skip
+    }
+  }
+
+  if (allSources.length === 0) return NextResponse.json({ context: null });
+
+  const sourceText = allSources
+    .map((m, i) => {
+      if (m.source === "slack") {
+        return `Slack ${i + 1}:\n  De: @${m.from} dans ${m.subject}\n  Date: ${m.date}\n  Message: ${m.body}`;
+      }
+      return `Email ${i + 1}:\n  De: ${m.from}\n  Date: ${m.date}\n  Sujet: ${m.subject}\n  Contenu: ${m.body}`;
+    })
     .join("\n\n");
 
   const prompt = `Tu prépares un briefing pour un meeting "${title}"${deal && deal !== "_unmatched" ? ` (projet: ${deal})` : ""}.
 
-Voici les échanges email récents liés à ce meeting :
+Voici les échanges récents (emails et messages Slack) liés à ce meeting :
 
-${emailText}
+${sourceText}
 
 Génère un briefing de préparation concis mais complet en français (3-6 lignes max). Inclus :
 - Les sujets/enjeux principaux à discuter

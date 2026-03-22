@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   email TEXT UNIQUE,
   name TEXT,
   google_tokens JSONB,
+  slack_tokens JSONB,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

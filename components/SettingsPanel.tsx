@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Deal, Task } from "@/lib/types";
 import { COLOR_PALETTE } from "@/lib/constants";
 
@@ -15,6 +15,29 @@ interface SettingsPanelProps {
 export default function SettingsPanel({ deals, tasks, mobile, onAddDeal, onRemoveDeal }: SettingsPanelProps) {
   const [newDealName, setNewDealName] = useState("");
   const [newDealColor, setNewDealColor] = useState(COLOR_PALETTE[deals.length % COLOR_PALETTE.length]);
+  const [slackConnected, setSlackConnected] = useState(false);
+  const [slackTeam, setSlackTeam] = useState<string | null>(null);
+  const [slackLoading, setSlackLoading] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/slack/status")
+      .then((r) => r.json())
+      .then((d) => {
+        setSlackConnected(d.connected);
+        setSlackTeam(d.team);
+      })
+      .catch(() => {});
+  }, []);
+
+  const disconnectSlack = async () => {
+    setSlackLoading(true);
+    try {
+      await fetch("/auth/slack", { method: "POST" });
+      setSlackConnected(false);
+      setSlackTeam(null);
+    } catch {}
+    setSlackLoading(false);
+  };
 
   return (
     <div
@@ -112,6 +135,58 @@ export default function SettingsPanel({ deals, tasks, mobile, onAddDeal, onRemov
         >
           +
         </div>
+      </div>
+
+      {/* Integrations */}
+      <div
+        className="uppercase tracking-[0.5px] mt-4 mb-2"
+        style={{ fontSize: "11px", fontWeight: 500, color: "#52525B" }}
+      >
+        Intégrations
+      </div>
+
+      <div className="flex items-center gap-2 rounded-md" style={{ padding: "6px 8px", background: "rgba(255,255,255,0.02)" }}>
+        <span style={{ fontSize: "13px" }}>💬</span>
+        <span className="flex-1" style={{ fontSize: "13px", color: "#CBD5E1" }}>
+          Slack
+          {slackConnected && slackTeam && (
+            <span style={{ fontSize: "10px", color: "#52525B", marginLeft: "6px" }}>{slackTeam}</span>
+          )}
+        </span>
+        {slackConnected ? (
+          <div
+            onClick={!slackLoading ? disconnectSlack : undefined}
+            className="cursor-pointer rounded-[5px]"
+            style={{
+              padding: "3px 8px",
+              fontSize: "10px",
+              color: "#F87171",
+              background: "rgba(248,113,113,0.08)",
+              opacity: slackLoading ? 0.5 : 1,
+            }}
+          >
+            Déconnecter
+          </div>
+        ) : (
+          <a
+            href="/auth/slack"
+            className="rounded-[5px] no-underline"
+            style={{
+              padding: "3px 8px",
+              fontSize: "10px",
+              color: "#34D399",
+              background: "rgba(52,211,153,0.08)",
+            }}
+          >
+            Connecter
+          </a>
+        )}
+      </div>
+      <div style={{ fontSize: "10px", color: "#27272A", marginTop: "4px", paddingLeft: "8px" }}>
+        {slackConnected
+          ? "Slack est utilisé pour enrichir les contextes meetings"
+          : "Connecte Slack pour ajouter tes messages aux contextes meetings"
+        }
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getGoogleTokens, googleFetch } from "@/lib/google";
+import { getSlackTokens, searchSlackMessages } from "@/lib/slack";
 
 interface GmailMessageDetail {
   id: string;
@@ -33,10 +34,28 @@ function getHeader(msg: GmailMessageDetail, name: string): string {
   return msg.payload?.headers?.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value || "";
 }
 
+const STOPWORDS = new Set([
+  "meeting", "call", "point", "weekly", "daily", "sync", "standup",
+  "review", "discussion", "team", "mail", "intern", "interne", "externe",
+  "the", "and", "les", "des", "pour", "avec", "par", "sur", "pas",
+  "réunion", "prep", "prépa", "debrief", "catch", "update", "check",
+  "management", "staffing", "entretien", "agenda",
+]);
+
+function extractKeywords(title: string): string[] {
+  return title
+    .replace(/[^a-zA-ZÀ-ÿ0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && !STOPWORDS.has(w.toLowerCase()))
+    .slice(0, 4);
+}
+
 // POST /api/calendar/context — Generate short context summaries for calendar events
 export async function POST(request: Request) {
   const tokens = await getGoogleTokens();
   if (!tokens) return NextResponse.json({ error: "No Google tokens" }, { status: 401 });
+
+  const slackTokens = await getSlackTokens();
 
   const body = await request.json();
   const events: Array<{ key: string; title: string }> = body.events || [];
@@ -45,32 +64,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ contexts: {} });
   }
 
-  // Search Gmail for related emails for each event
-  const allEmails: Array<{ eventKey: string; subject: string; from: string; body: string }> = [];
+  // Collect messages from Gmail + Slack for each event
+  const allMessages: Array<{ eventKey: string; source: string; from: string; subject: string; body: string }> = [];
 
   const now = new Date();
   const twoWeeksAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 14);
   const afterEpoch = Math.floor(twoWeeksAgo.getTime() / 1000);
 
-  const STOPWORDS = new Set([
-    "meeting", "call", "point", "weekly", "daily", "sync", "standup",
-    "review", "discussion", "team", "mail", "intern", "interne", "externe",
-    "the", "and", "les", "des", "pour", "avec", "par", "sur", "pas",
-    "réunion", "prep", "prépa", "debrief", "catch", "update", "check",
-    "management", "staffing", "entretien", "agenda",
-  ]);
-
   for (const event of events.slice(0, 10)) {
-    const words = event.title
-      .replace(/[^a-zA-ZÀ-ÿ0-9\s]/g, " ")
-      .split(/\s+/)
-      .filter((w) => w.length > 2 && !STOPWORDS.has(w.toLowerCase()))
-      .slice(0, 4);
-
+    const words = extractKeywords(event.title);
     if (words.length === 0) continue;
 
+    // Gmail search
     try {
-      // Use AND (no curly braces) so ALL keywords must match, not just one
       const query = `after:${afterEpoch} ${words.join(" ")}`;
       const searchData = await googleFetch(
         `https://www.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=5`,
@@ -78,7 +84,6 @@ export async function POST(request: Request) {
       );
 
       const messageIds: Array<{ id: string }> = searchData.messages || [];
-
       if (messageIds.length > 0) {
         const details = await Promise.all(
           messageIds.slice(0, 4).map(async (m) => {
@@ -88,20 +93,39 @@ export async function POST(request: Request) {
             );
             return {
               eventKey: event.key,
+              source: "email",
               subject: getHeader(detail, "Subject"),
               from: getHeader(detail, "From"),
               body: extractBody(detail).slice(0, 400),
             };
           })
         );
-        allEmails.push(...details);
+        allMessages.push(...details);
       }
     } catch {
-      // Skip this event if Gmail search fails
+      // Skip Gmail errors
+    }
+
+    // Slack search
+    if (slackTokens) {
+      try {
+        const slackResults = await searchSlackMessages(slackTokens, words, 3);
+        for (const msg of slackResults) {
+          allMessages.push({
+            eventKey: event.key,
+            source: "slack",
+            from: msg.from,
+            subject: `#${msg.channel}`,
+            body: msg.text.slice(0, 400),
+          });
+        }
+      } catch {
+        // Skip Slack errors
+      }
     }
   }
 
-  if (allEmails.length === 0) {
+  if (allMessages.length === 0) {
     return NextResponse.json({ contexts: {} });
   }
 
@@ -110,22 +134,27 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "OPENAI_API_KEY not configured" }, { status: 500 });
   }
 
-  // Group emails by event
-  const emailsByEvent: Record<string, typeof allEmails> = {};
-  for (const email of allEmails) {
-    if (!emailsByEvent[email.eventKey]) emailsByEvent[email.eventKey] = [];
-    emailsByEvent[email.eventKey].push(email);
+  // Group messages by event
+  const msgsByEvent: Record<string, typeof allMessages> = {};
+  for (const msg of allMessages) {
+    if (!msgsByEvent[msg.eventKey]) msgsByEvent[msg.eventKey] = [];
+    msgsByEvent[msg.eventKey].push(msg);
   }
 
-  const eventSummaries = Object.entries(emailsByEvent).map(([key, emails]) => {
+  const eventSummaries = Object.entries(msgsByEvent).map(([key, msgs]) => {
     const event = events.find((e) => e.key === key);
-    const emailText = emails
-      .map((m, i) => `  Email ${i + 1}: From: ${m.from} | Subject: ${m.subject} | ${m.body.slice(0, 300)}`)
+    const msgText = msgs
+      .map((m, i) => {
+        if (m.source === "slack") {
+          return `  Slack ${i + 1}: @${m.from} in ${m.subject} | ${m.body.slice(0, 300)}`;
+        }
+        return `  Email ${i + 1}: From: ${m.from} | Subject: ${m.subject} | ${m.body.slice(0, 300)}`;
+      })
       .join("\n");
-    return `Meeting "${event?.title}" (key: ${key}):\n${emailText}`;
+    return `Meeting "${event?.title}" (key: ${key}):\n${msgText}`;
   }).join("\n\n");
 
-  const prompt = `Pour chaque meeting ci-dessous, génère un résumé de contexte TRÈS court (max 80 caractères) basé sur les échanges email. Le résumé doit donner en un coup d'oeil les sujets/enjeux principaux du meeting.
+  const prompt = `Pour chaque meeting ci-dessous, génère un résumé de contexte TRÈS court (max 80 caractères) basé sur les échanges email et Slack. Le résumé doit donner en un coup d'oeil les sujets/enjeux principaux du meeting.
 
 ${eventSummaries}
 
