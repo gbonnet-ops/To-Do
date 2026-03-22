@@ -9,6 +9,7 @@ interface CalendarEvent {
   start?: { dateTime?: string; date?: string };
   end?: { dateTime?: string; date?: string };
   location?: string;
+  attendees?: Array<{ email?: string; displayName?: string; self?: boolean }>;
 }
 
 // GET /api/calendar?start=YYYY-MM-DD&end=YYYY-MM-DD
@@ -81,6 +82,11 @@ export async function GET(request: Request) {
         }
       }
 
+      // Extract attendee emails (exclude self)
+      const attendees = (e.attendees || [])
+        .filter((a) => !a.self && a.email)
+        .map((a) => a.email as string);
+
       return {
         title,
         start: startStr,
@@ -88,6 +94,7 @@ export async function GET(request: Request) {
         date,
         location: e.location || null,
         deal: matchedDeal || "_unmatched",
+        attendees,
       };
     })
     .filter(Boolean);

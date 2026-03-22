@@ -30,6 +30,7 @@ export interface CalendarEvent {
   location: string | null;
   deal?: string | null;
   context?: string | null;
+  attendees?: string[];
 }
 
 export interface EmailSuggestion {

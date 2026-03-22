@@ -49,6 +49,16 @@ const STOPWORDS = new Set([
   "management", "staffing", "entretien", "agenda",
 ]);
 
+function attendeeNames(attendees: string[]): string[] {
+  return attendees
+    .map((email) => {
+      const local = email.split("@")[0];
+      return local.replace(/[._-]/g, " ").split(/\s+/)[0];
+    })
+    .filter((n) => n.length > 2)
+    .slice(0, 4);
+}
+
 // POST /api/calendar/context/deep — Generate a detailed context for a single meeting
 export async function POST(request: Request) {
   const supabase = await createServerSupabaseClient();
@@ -64,12 +74,16 @@ export async function POST(request: Request) {
   const slackTokens = await getSlackTokens();
 
   const body = await request.json();
-  const { title, deal } = body as { key: string; title: string; deal?: string };
+  const { title, deal, attendees: rawAttendees, date: eventDate } = body as {
+    key: string; title: string; deal?: string; attendees?: string[]; date?: string;
+  };
 
   if (!title) return NextResponse.json({ error: "Missing title" }, { status: 400 });
 
   const openaiKey = process.env.OPENAI_API_KEY;
   if (!openaiKey) return NextResponse.json({ error: "OPENAI_API_KEY not configured" }, { status: 500 });
+
+  const attendees = rawAttendees || [];
 
   const titleWords = title
     .replace(/[^a-zA-ZÀ-ÿ0-9\s]/g, " ")
@@ -82,35 +96,67 @@ export async function POST(request: Request) {
     : [];
 
   const searchTerms = [...new Set([...titleWords, ...dealWords])];
-  if (searchTerms.length === 0) return NextResponse.json({ context: null });
 
-  const now = new Date();
-  const fourWeeksAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 28);
-  const afterEpoch = Math.floor(fourWeeksAgo.getTime() / 1000);
+  // Time windows: 7 days tight (attendee search) + 14 days wider (keyword search)
+  const meetingDate = eventDate ? new Date(eventDate) : new Date();
+  const sevenDaysBefore = new Date(meetingDate.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const fourteenDaysBefore = new Date(meetingDate.getTime() - 14 * 24 * 60 * 60 * 1000);
+  const tightEpoch = Math.floor(sevenDaysBefore.getTime() / 1000);
+  const wideEpoch = Math.floor(fourteenDaysBefore.getTime() / 1000);
 
-  // Collect all sources
   const allSources: Array<{ source: string; from: string; date: string; subject: string; body: string }> = [];
+  const seenIds = new Set<string>();
 
-  // Gmail search
-  try {
-    const queries = [
-      searchTerms.length > 0 ? `after:${afterEpoch} ${searchTerms.join(" ")}` : null,
-      dealWords.length > 0 && titleWords.length > 0 ? `after:${afterEpoch} ${dealWords.join(" ")}` : null,
-    ].filter(Boolean) as string[];
+  // Strategy: prioritized Gmail queries
+  const gmailQueries: Array<{ query: string; max: number }> = [];
 
-    const seenIds = new Set<string>();
+  // 1. Emails with attendees + keywords (most relevant)
+  if (attendees.length > 0 && searchTerms.length > 0) {
+    const attendeeFilter = attendees.slice(0, 4).map((e) => `from:${e} OR to:${e}`).join(" OR ");
+    gmailQueries.push({
+      query: `after:${tightEpoch} (${attendeeFilter}) ${searchTerms.join(" ")}`,
+      max: 6,
+    });
+  }
 
-    for (const query of queries) {
+  // 2. Recent threads with attendees (conversations leading up to meeting)
+  if (attendees.length > 0) {
+    const attendeeFilter = attendees.slice(0, 4).map((e) => `from:${e} OR to:${e}`).join(" OR ");
+    gmailQueries.push({
+      query: `after:${tightEpoch} (${attendeeFilter})`,
+      max: 6,
+    });
+  }
+
+  // 3. Keywords in wider window (fallback)
+  if (searchTerms.length > 0) {
+    gmailQueries.push({
+      query: `after:${wideEpoch} ${searchTerms.join(" ")}`,
+      max: 6,
+    });
+  }
+
+  // 4. Deal-specific search
+  if (dealWords.length > 0 && dealWords.join(" ") !== searchTerms.join(" ")) {
+    gmailQueries.push({
+      query: `after:${wideEpoch} ${dealWords.join(" ")}`,
+      max: 4,
+    });
+  }
+
+  // Execute Gmail queries
+  for (const { query, max } of gmailQueries) {
+    if (seenIds.size >= 12) break; // enough total context
+    try {
       const searchData = await googleFetch(
-        `https://www.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=10`,
+        `https://www.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=${max}`,
         tokens
       );
       const messageIds: Array<{ id: string }> = searchData.messages || [];
 
-      for (const m of messageIds.slice(0, 8)) {
-        if (seenIds.has(m.id)) continue;
+      for (const m of messageIds) {
+        if (seenIds.has(m.id) || seenIds.size >= 12) continue;
         seenIds.add(m.id);
-
         try {
           const detail: GmailMessageDetail = await googleFetch(
             `https://www.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=full`,
@@ -123,48 +169,70 @@ export async function POST(request: Request) {
             date: getHeader(detail, "Date"),
             body: extractBody(detail).slice(0, 800),
           });
-        } catch {
-          // skip
-        }
+        } catch { /* skip */ }
       }
-    }
-  } catch {
-    // skip
+    } catch { /* skip */ }
   }
 
-  // Slack search
+  // Slack search — multiple strategies
   if (slackTokens) {
-    try {
-      // Search with title keywords
-      const slackResults = await searchSlackMessages(slackTokens, searchTerms, 8);
-      for (const msg of slackResults) {
-        allSources.push({
-          source: "slack",
-          from: msg.from,
-          date: msg.date,
-          subject: `#${msg.channel}`,
-          body: msg.text.slice(0, 600),
-        });
-      }
+    const names = attendeeNames(attendees);
 
-      // Also search with deal name alone if different from title keywords
-      if (dealWords.length > 0) {
-        const dealResults = await searchSlackMessages(slackTokens, dealWords, 5);
-        const existingTexts = new Set(allSources.filter((s) => s.source === "slack").map((s) => s.body));
-        for (const msg of dealResults) {
-          if (!existingTexts.has(msg.text.slice(0, 600))) {
+    // 1. Attendee names + keywords
+    if (names.length > 0 && searchTerms.length > 0) {
+      try {
+        const terms = [...names.slice(0, 2), ...searchTerms.slice(0, 2)];
+        const results = await searchSlackMessages(slackTokens, terms, 5);
+        for (const msg of results) {
+          allSources.push({
+            source: "slack",
+            from: msg.from,
+            date: msg.date,
+            subject: `#${msg.channel}`,
+            body: msg.text.slice(0, 600),
+          });
+        }
+      } catch { /* skip */ }
+    }
+
+    // 2. Keywords only on Slack
+    if (searchTerms.length > 0) {
+      try {
+        const existingSlackBodies = new Set(allSources.filter((s) => s.source === "slack").map((s) => s.body));
+        const results = await searchSlackMessages(slackTokens, searchTerms, 5);
+        for (const msg of results) {
+          const body = msg.text.slice(0, 600);
+          if (!existingSlackBodies.has(body)) {
             allSources.push({
               source: "slack",
               from: msg.from,
               date: msg.date,
               subject: `#${msg.channel}`,
-              body: msg.text.slice(0, 600),
+              body,
             });
           }
         }
-      }
-    } catch {
-      // skip
+      } catch { /* skip */ }
+    }
+
+    // 3. Deal name on Slack
+    if (dealWords.length > 0) {
+      try {
+        const existingSlackBodies = new Set(allSources.filter((s) => s.source === "slack").map((s) => s.body));
+        const results = await searchSlackMessages(slackTokens, dealWords, 3);
+        for (const msg of results) {
+          const body = msg.text.slice(0, 600);
+          if (!existingSlackBodies.has(body)) {
+            allSources.push({
+              source: "slack",
+              from: msg.from,
+              date: msg.date,
+              subject: `#${msg.channel}`,
+              body,
+            });
+          }
+        }
+      } catch { /* skip */ }
     }
   }
 
@@ -179,18 +247,24 @@ export async function POST(request: Request) {
     })
     .join("\n\n");
 
-  const prompt = `Tu prépares un briefing pour un meeting "${title}"${deal && deal !== "_unmatched" ? ` (projet: ${deal})` : ""}.
+  const attendeeInfo = attendees.length > 0
+    ? `\nParticipants du meeting: ${attendees.join(", ")}`
+    : "";
 
-Voici les échanges récents (emails et messages Slack) liés à ce meeting :
+  const prompt = `Tu prépares un briefing pour un meeting "${title}"${deal && deal !== "_unmatched" ? ` (projet: ${deal})` : ""}.${attendeeInfo}
+
+Voici les échanges récents (emails et messages Slack) avec les participants de ce meeting :
 
 ${sourceText}
 
-Génère un briefing de préparation concis mais complet en français (3-6 lignes max). Inclus :
-- Les sujets/enjeux principaux à discuter
-- Les points en suspens ou décisions à prendre
-- Le contexte clé (chiffres, dates, noms importants)
+IMPORTANT: Base-toi UNIQUEMENT sur le contenu concret des messages ci-dessus. Ne fais PAS de suppositions sur le projet en général. Résume ce qui a été dit/demandé/décidé récemment par les participants.
 
-Sois direct et factuel. Pas de formule de politesse. Retourne uniquement le texte du briefing.`;
+Génère un briefing de préparation concis mais complet en français (3-6 lignes max). Inclus :
+- Ce dont les participants ont discuté récemment (sujets concrets)
+- Les questions/demandes en attente de réponse
+- Les points à trancher ou valider lors du meeting
+
+Sois direct et factuel. Pas de formule de politesse. Retourne uniquement le texte du briefing. Si les messages ne sont pas pertinents au meeting, dis-le en une phrase.`;
 
   try {
     const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {

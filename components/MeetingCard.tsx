@@ -38,6 +38,8 @@ export default function MeetingCard({ event, dotColor, mobile, onDeepContext }: 
           key: `${event.title}|${event.start}`,
           title: event.title,
           deal: event.deal,
+          attendees: event.attendees || [],
+          date: event.date,
         }),
       });
       if (res.ok) {

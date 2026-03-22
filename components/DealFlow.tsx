@@ -213,6 +213,8 @@ export default function DealFlow() {
       const eventsToFetch = events.map((e) => ({
         key: calEventKey(e.title, e.start),
         title: e.title,
+        attendees: e.attendees || [],
+        date: e.date,
       }));
       const res = await fetch("/api/calendar/context", {
         method: "POST",
@@ -251,6 +253,8 @@ export default function DealFlow() {
       const eventsToFetch = calEvents.map((e) => ({
         key: calEventKey(e.title, e.start),
         title: e.title,
+        attendees: e.attendees || [],
+        date: e.date,
       }));
       if (eventsToFetch.length > 0) {
         const res = await fetch("/api/calendar/context", {
