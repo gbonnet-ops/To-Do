@@ -50,10 +50,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ completions: [] });
   }
 
-  // Fetch sent emails from today
+  // Fetch sent emails from today and yesterday
   const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const afterEpoch = Math.floor(todayStart.getTime() / 1000);
+  const yesterdayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  const afterEpoch = Math.floor(yesterdayStart.getTime() / 1000);
 
   // Search sent emails only (in:sent)
   const url = new URL("https://www.googleapis.com/gmail/v1/users/me/messages");

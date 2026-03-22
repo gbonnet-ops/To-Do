@@ -75,10 +75,10 @@ export async function POST(request: Request) {
   const scannedIds: string[] = body.scannedIds || [];
   const scannedSet = new Set(scannedIds);
 
-  // Fetch all messages from today
+  // Fetch all messages from today and yesterday
   const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const afterEpoch = Math.floor(todayStart.getTime() / 1000);
+  const yesterdayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  const afterEpoch = Math.floor(yesterdayStart.getTime() / 1000);
 
   const allIds = await fetchAllMessageIds(`after:${afterEpoch}`, tokens);
 

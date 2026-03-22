@@ -106,13 +106,19 @@ export const apiAddDeal = async (deal: {
   return res.json();
 };
 
-// ── Gmail scanned IDs (daily memory) ──
+// ── Gmail scanned IDs (rolling 2-day memory) ──
 
 const GMAIL_SCANNED_KEY = "dealflow-gmail-scanned";
 
 interface GmailScannedData {
-  date: string; // YYYY-MM-DD
+  date: string; // YYYY-MM-DD of last update
   ids: string[];
+}
+
+function yesterdayStr(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return d.toISOString().slice(0, 10);
 }
 
 export const loadScannedGmailIds = (): string[] => {
@@ -122,8 +128,9 @@ export const loadScannedGmailIds = (): string[] => {
     if (!raw) return [];
     const data: GmailScannedData = JSON.parse(raw);
     const today = new Date().toISOString().slice(0, 10);
-    // Reset if not from today
-    if (data.date !== today) {
+    const yesterday = yesterdayStr();
+    // Keep data if it was saved today or yesterday
+    if (data.date !== today && data.date !== yesterday) {
       localStorage.removeItem(GMAIL_SCANNED_KEY);
       return [];
     }
