@@ -47,7 +47,13 @@ export async function GET(request: Request) {
 
     if (deals) {
       deals.forEach((d) => {
-        dealKeywords[d.name] = d.keywords || [];
+        // Always include the deal name itself as an implicit keyword
+        const kw = d.keywords || [];
+        const nameLower = d.name.toLowerCase();
+        if (!kw.some((k: string) => k.toLowerCase() === nameLower)) {
+          kw.push(d.name);
+        }
+        dealKeywords[d.name] = kw;
         dealColors[d.name] = d.color;
       });
     }

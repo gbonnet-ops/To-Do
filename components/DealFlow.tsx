@@ -4,7 +4,12 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Task, Deal, CalendarEvent, EmailSuggestion, StatusMessage, ViewType } from "@/lib/types";
 import { DEFAULT_DEALS } from "@/lib/constants";
 import { uid, todayStr, isOverdue, isToday, greet, getWeekDays, formatDeadline } from "@/lib/utils";
-import { loadTasks, saveTasks, loadDeals, saveDeals } from "@/lib/store";
+import {
+  loadTasks, saveTasks, loadDeals, saveDeals,
+  fetchTasks, fetchDeals,
+  apiAddTask, apiUpdateTask, apiDeleteTask,
+  apiAddDeal, apiDeleteDeal,
+} from "@/lib/store";
 import QuickAdd from "./QuickAdd";
 import SettingsPanel from "./SettingsPanel";
 import FocusView from "./views/FocusView";
@@ -47,19 +52,61 @@ export default function DealFlow() {
   const DEALS = deals.map((d) => d.name);
   const DEAL_DOT: Record<string, string> = Object.fromEntries(deals.map((d) => [d.name, d.color]));
 
-  // Load data
-  useEffect(() => {
-    const t = loadTasks();
-    const d = loadDeals();
-    setTasks(t);
-    setDeals(d);
-    setLoading(false);
-    setTimeout(() => { initialized.current = true; }, 50);
+  // ── Load data from API (source of truth), fallback to localStorage ──
+  const loadFromApi = useCallback(async () => {
+    try {
+      const [apiTasks, apiDeals] = await Promise.all([fetchTasks(), fetchDeals()]);
+
+      if (apiDeals.length > 0) {
+        setDeals(apiDeals);
+        saveDeals(apiDeals);
+      } else {
+        // First time: seed deals to Supabase from defaults
+        const localDeals = loadDeals();
+        setDeals(localDeals);
+        for (let i = 0; i < localDeals.length; i++) {
+          const d = localDeals[i];
+          apiAddDeal({
+            name: d.name,
+            color: d.color,
+            keywords: [d.name.toLowerCase()],
+            sort_order: i,
+          }).catch(() => {});
+        }
+      }
+
+      setTasks(apiTasks);
+      saveTasks(apiTasks);
+      return true;
+    } catch {
+      // API failed (not logged in or network error) — use localStorage
+      setTasks(loadTasks());
+      setDeals(loadDeals());
+      return false;
+    }
   }, []);
 
-  // Persist
+  useEffect(() => {
+    loadFromApi().then(() => {
+      setLoading(false);
+      setTimeout(() => { initialized.current = true; }, 50);
+    });
+  }, [loadFromApi]);
+
+  // Persist to localStorage on changes
   useEffect(() => { if (initialized.current) saveTasks(tasks); }, [tasks]);
   useEffect(() => { if (initialized.current) saveDeals(deals); }, [deals]);
+
+  // ── Re-fetch on tab focus (cross-device sync) ──
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === "visible" && initialized.current) {
+        loadFromApi().catch(() => {});
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [loadFromApi]);
 
   // Recent assignees
   const recentAssignees = [...new Set(tasks.map((t) => t.assignee).filter(Boolean))] as string[];
@@ -119,12 +166,15 @@ export default function DealFlow() {
   const acceptSuggestion = useCallback((idx: number) => {
     const s = suggestions[idx];
     if (!s) return;
-    setTasks((p) => [{
-      id: uid(), text: s.text, deal: s.deal || "Perso",
+    const id = uid();
+    const task: Task = {
+      id, text: s.text, deal: s.deal || "Perso",
       priority: s.priority || "medium", deadline: s.deadline || null,
       assignee: s.assignee || null, done: false, created_at: new Date().toISOString(),
-    }, ...p]);
+    };
+    setTasks((p) => [task, ...p]);
     setSuggestions((p) => p.filter((_, i) => i !== idx));
+    apiAddTask({ id, text: task.text, deal: task.deal, priority: task.priority, deadline: task.deadline, assignee: task.assignee, source: "gmail" }).catch(() => {});
   }, [suggestions]);
 
   const acceptAllSuggestions = useCallback(() => {
@@ -135,6 +185,9 @@ export default function DealFlow() {
     }));
     setTasks((p) => [...newTasks, ...p]);
     setSuggestions([]);
+    for (const t of newTasks) {
+      apiAddTask({ id: t.id, text: t.text, deal: t.deal, priority: t.priority, deadline: t.deadline, assignee: t.assignee, source: "gmail" }).catch(() => {});
+    }
   }, [suggestions]);
 
   // ── Push task deadline to calendar ──
@@ -155,6 +208,7 @@ export default function DealFlow() {
       });
       if (!res.ok) throw new Error(`Calendar push: ${res.status}`);
       setTasks((p) => p.map((t) => t.id === id ? { ...t, synced: true } : t));
+      apiUpdateTask(id, { synced: true }).catch(() => {});
       setStatusMsg({ type: "ok", text: "Ajouté au Calendar" });
     } catch (e) {
       setStatusMsg({ type: "error", text: `Push: ${e instanceof Error ? e.message : "erreur"}` });
@@ -163,26 +217,66 @@ export default function DealFlow() {
     setTimeout(() => setStatusMsg(null), 4000);
   }, [tasks]);
 
-  // Task operations
+  // ── Task operations (optimistic + API sync) ──
   const addTask = useCallback((text: string, dealName: string, priority: "high" | "medium" | "low", deadline: string | null, assignee: string | null) => {
+    const id = uid();
     setTasks((p) => [{
-      id: uid(), text, deal: dealName, priority, deadline, assignee,
+      id, text, deal: dealName, priority, deadline, assignee,
       done: false, created_at: new Date().toISOString(),
     }, ...p]);
+    apiAddTask({ id, text, deal: dealName, priority, deadline, assignee }).catch(() => {});
   }, []);
 
-  const toggle = useCallback((id: string) => setTasks((p) => p.map((t) => t.id === id ? { ...t, done: !t.done } : t)), []);
-  const del = useCallback((id: string) => setTasks((p) => p.filter((t) => t.id !== id)), []);
-  const edit = useCallback((id: string, text: string) => setTasks((p) => p.map((t) => t.id === id ? { ...t, text } : t)), []);
-  const changeDeal = useCallback((id: string, newDeal: string) => setTasks((p) => p.map((t) => t.id === id ? { ...t, deal: newDeal } : t)), []);
-  const changePri = useCallback((id: string, newPri: string) => setTasks((p) => p.map((t) => t.id === id ? { ...t, priority: newPri as Task["priority"] } : t)), []);
-  const changeAssignee = useCallback((id: string, name: string | null) => setTasks((p) => p.map((t) => t.id === id ? { ...t, assignee: name || null } : t)), []);
-  const clearDone = useCallback(() => setTasks((p) => p.filter((t) => !t.done)), []);
+  const toggle = useCallback((id: string) => {
+    let newDone = false;
+    setTasks((p) => p.map((t) => {
+      if (t.id !== id) return t;
+      newDone = !t.done;
+      return { ...t, done: newDone, completed_at: newDone ? new Date().toISOString() : null };
+    }));
+    // Use setTimeout to ensure newDone is set after the state updater runs
+    setTimeout(() => apiUpdateTask(id, { done: newDone }).catch(() => {}), 0);
+  }, []);
 
-  // Deal management
+  const del = useCallback((id: string) => {
+    setTasks((p) => p.filter((t) => t.id !== id));
+    apiDeleteTask(id).catch(() => {});
+  }, []);
+
+  const edit = useCallback((id: string, text: string) => {
+    setTasks((p) => p.map((t) => t.id === id ? { ...t, text } : t));
+    apiUpdateTask(id, { text }).catch(() => {});
+  }, []);
+
+  const changeDeal = useCallback((id: string, newDeal: string) => {
+    setTasks((p) => p.map((t) => t.id === id ? { ...t, deal: newDeal } : t));
+    apiUpdateTask(id, { deal: newDeal }).catch(() => {});
+  }, []);
+
+  const changePri = useCallback((id: string, newPri: string) => {
+    setTasks((p) => p.map((t) => t.id === id ? { ...t, priority: newPri as Task["priority"] } : t));
+    apiUpdateTask(id, { priority: newPri as Task["priority"] }).catch(() => {});
+  }, []);
+
+  const changeAssignee = useCallback((id: string, name: string | null) => {
+    setTasks((p) => p.map((t) => t.id === id ? { ...t, assignee: name || null } : t));
+    apiUpdateTask(id, { assignee: name || null }).catch(() => {});
+  }, []);
+
+  const clearDone = useCallback(() => {
+    const doneTasks = tasks.filter((t) => t.done);
+    setTasks((p) => p.filter((t) => !t.done));
+    for (const t of doneTasks) {
+      apiDeleteTask(t.id).catch(() => {});
+    }
+  }, [tasks]);
+
+  // ── Deal management (optimistic + API sync) ──
   const addDeal = useCallback((name: string, color: string) => {
     if (!name.trim() || deals.some((d) => d.name.toLowerCase() === name.trim().toLowerCase())) return;
-    setDeals((p) => [...p, { name: name.trim(), color }]);
+    const trimmed = name.trim();
+    setDeals((p) => [...p, { name: trimmed, color }]);
+    apiAddDeal({ name: trimmed, color, keywords: [trimmed.toLowerCase()], sort_order: deals.length }).catch(() => {});
   }, [deals]);
 
   const removeDeal = useCallback((name: string) => {
@@ -193,6 +287,7 @@ export default function DealFlow() {
     }
     setDeals((p) => p.filter((d) => d.name !== name));
     if (deal === name) setDeal("Tous");
+    apiDeleteDeal(name).catch(() => {});
   }, [tasks, deal]);
 
   // Filtering & sorting

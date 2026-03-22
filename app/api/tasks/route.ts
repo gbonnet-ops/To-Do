@@ -52,9 +52,7 @@ export async function POST(request: Request) {
     dealId = deal?.id || null;
   }
 
-  const { data, error } = await supabase
-    .from("tasks")
-    .insert({
+  const insertData: Record<string, unknown> = {
       user_id: user.id,
       deal_id: dealId,
       text: body.text,
@@ -64,7 +62,16 @@ export async function POST(request: Request) {
       done: false,
       source: body.source || "manual",
       source_email_id: body.source_email_id || null,
-    })
+  };
+
+  // Accept client-provided UUID for optimistic updates
+  if (body.id) {
+    insertData.id = body.id;
+  }
+
+  const { data, error } = await supabase
+    .from("tasks")
+    .insert(insertData)
     .select()
     .single();
 
