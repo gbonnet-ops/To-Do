@@ -21,6 +21,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="fr" className="h-full antialiased">
+      <head>
+        <link rel="manifest" href="/manifest.webmanifest" />
+        <meta name="theme-color" content="#0A0A0B" />
+      </head>
       <body
         className="min-h-full flex flex-col"
         style={{
