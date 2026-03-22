@@ -8,7 +8,7 @@ import {
   loadTasks, saveTasks, loadDeals, saveDeals,
   fetchTasks, fetchDeals,
   apiAddTask, apiUpdateTask, apiDeleteTask,
-  apiAddDeal, apiDeleteDeal,
+  apiAddDeal, apiUpdateDeal, apiDeleteDeal,
   loadScannedGmailIds, saveScannedGmailIds,
   loadSeenCalendarKeys, saveSeenCalendarKeys, calEventKey,
   loadCalContexts, saveCalContexts,
@@ -213,6 +213,7 @@ export default function DealFlow() {
       const eventsToFetch = events.map((e) => ({
         key: calEventKey(e.title, e.start),
         title: e.title,
+        deal: e.deal || null,
         attendees: e.attendees || [],
         date: e.date,
       }));
@@ -523,12 +524,18 @@ export default function DealFlow() {
   }, [tasks]);
 
   // ── Deal management (optimistic + API sync) ──
-  const addDeal = useCallback((name: string, color: string) => {
+  const addDeal = useCallback((name: string, color: string, company?: string) => {
     if (!name.trim() || deals.some((d) => d.name.toLowerCase() === name.trim().toLowerCase())) return;
     const trimmed = name.trim();
-    setDeals((p) => [...p, { name: trimmed, color }]);
-    apiAddDeal({ name: trimmed, color, keywords: [trimmed.toLowerCase()], sort_order: deals.length }).catch(() => {});
+    const comp = company?.trim() || "";
+    setDeals((p) => [...p, { name: trimmed, color, company: comp || undefined }]);
+    apiAddDeal({ name: trimmed, color, company: comp || undefined, keywords: [trimmed.toLowerCase()], sort_order: deals.length }).catch(() => {});
   }, [deals]);
+
+  const updateDealCompany = useCallback((name: string, company: string) => {
+    setDeals((p) => p.map((d) => d.name === name ? { ...d, company: company || undefined } : d));
+    apiUpdateDeal(name, { company }).catch(() => {});
+  }, []);
 
   const removeDeal = useCallback((name: string) => {
     if (tasks.some((t) => t.deal === name && !t.done)) {
@@ -612,6 +619,7 @@ export default function DealFlow() {
             mobile={mobile}
             onAddDeal={addDeal}
             onRemoveDeal={removeDeal}
+            onUpdateDealCompany={updateDealCompany}
           />
         )}
 

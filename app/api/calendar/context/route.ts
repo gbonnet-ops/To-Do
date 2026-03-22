@@ -67,6 +67,7 @@ function attendeeNames(attendees: string[]): string[] {
 interface EventInput {
   key: string;
   title: string;
+  deal?: string | null;
   attendees?: string[];
   date?: string;
 }
@@ -92,12 +93,30 @@ export async function POST(request: Request) {
     return NextResponse.json({ contexts: {} });
   }
 
+  // Load deal→company mapping from DB
+  const { data: dealsData } = await supabase
+    .from("deals")
+    .select("name, company")
+    .eq("user_id", user.id);
+  const companyMap: Record<string, string> = {};
+  for (const d of dealsData || []) {
+    if (d.company) companyMap[d.name] = d.company;
+  }
+
   const allMessages: Array<{ eventKey: string; source: string; from: string; subject: string; body: string }> = [];
 
   for (const event of events.slice(0, 10)) {
     const words = extractKeywords(event.title);
     const attendees = event.attendees || [];
     const eventDate = event.date || "";
+    const dealName = event.deal && event.deal !== "_unmatched" ? event.deal : null;
+    const company = dealName ? companyMap[dealName] : null;
+
+    // Add company name as search keyword
+    const companyWords = company
+      ? company.replace(/[^a-zA-ZÀ-ÿ0-9\s]/g, " ").split(/\s+/).filter((w) => w.length > 2)
+      : [];
+    const allKeywords = [...new Set([...words, ...companyWords])];
 
     // Time window: 5 days before the meeting (tight = more relevant)
     const meetingDate = eventDate ? new Date(eventDate) : new Date();
@@ -105,23 +124,18 @@ export async function POST(request: Request) {
     const afterEpoch = Math.floor(fiveDaysBefore.getTime() / 1000);
 
     // Build targeted Gmail queries:
-    // 1. Emails with attendees (most relevant — actual exchanges with meeting participants)
-    // 2. Emails with title keywords in recent window (fallback)
     const gmailQueries: string[] = [];
 
-    if (attendees.length > 0 && words.length > 0) {
-      // Emails from/to attendees mentioning keywords
+    if (attendees.length > 0 && allKeywords.length > 0) {
       const attendeeFilter = attendees.slice(0, 3).map((e) => `from:${e} OR to:${e}`).join(" OR ");
-      gmailQueries.push(`after:${afterEpoch} (${attendeeFilter}) ${words.join(" ")}`);
+      gmailQueries.push(`after:${afterEpoch} (${attendeeFilter}) ${allKeywords.join(" ")}`);
     }
     if (attendees.length > 0) {
-      // Recent threads with attendees (even without title keywords)
       const attendeeFilter = attendees.slice(0, 3).map((e) => `from:${e} OR to:${e}`).join(" OR ");
       gmailQueries.push(`after:${afterEpoch} (${attendeeFilter})`);
     }
-    if (words.length > 0) {
-      // Fallback: keyword search in tight window
-      gmailQueries.push(`after:${afterEpoch} ${words.join(" ")}`);
+    if (allKeywords.length > 0) {
+      gmailQueries.push(`after:${afterEpoch} ${allKeywords.join(" ")}`);
     }
 
     const seenIds = new Set<string>();
@@ -159,7 +173,7 @@ export async function POST(request: Request) {
       try {
         const names = attendeeNames(attendees);
         // Search by attendee name + keywords (e.g. "jean alpha")
-        const slackTerms = [...names.slice(0, 2), ...words.slice(0, 2)].filter(Boolean);
+        const slackTerms = [...names.slice(0, 2), ...allKeywords.slice(0, 2)].filter(Boolean);
         if (slackTerms.length > 0) {
           const slackResults = await searchSlackMessages(slackTokens, slackTerms, 3);
           for (const msg of slackResults) {
@@ -202,7 +216,10 @@ export async function POST(request: Request) {
         return `  Email ${i + 1}: From: ${m.from} | Subject: ${m.subject} | ${m.body.slice(0, 300)}`;
       })
       .join("\n");
-    return `Meeting "${event?.title}" (key: ${key}):\n${msgText}`;
+    const dealName = event?.deal && event.deal !== "_unmatched" ? event.deal : null;
+    const comp = dealName ? companyMap[dealName] : null;
+    const dealInfo = dealName ? ` (projet: ${dealName}${comp ? `, entreprise: ${comp}` : ""})` : "";
+    return `Meeting "${event?.title}"${dealInfo} (key: ${key}):\n${msgText}`;
   }).join("\n\n");
 
   const prompt = `Pour chaque meeting ci-dessous, génère un résumé de contexte TRÈS court (max 80 caractères) basé UNIQUEMENT sur les échanges email/Slack fournis. Résume ce qui a été discuté concrètement, pas le sujet général du projet.

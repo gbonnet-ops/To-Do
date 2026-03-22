@@ -2,6 +2,7 @@ export interface Deal {
   id?: string;
   name: string;
   color: string;
+  company?: string;
   keywords?: string[];
   sort_order?: number;
 }

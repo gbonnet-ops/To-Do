@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS public.deals (
   user_id UUID REFERENCES public.profiles ON DELETE CASCADE NOT NULL,
   name TEXT NOT NULL,
   color TEXT NOT NULL,
+  company TEXT,
   keywords TEXT[],
   sort_order INT DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT NOW()

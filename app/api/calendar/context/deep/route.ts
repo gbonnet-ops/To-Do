@@ -85,6 +85,18 @@ export async function POST(request: Request) {
 
   const attendees = rawAttendees || [];
 
+  // Look up company name for this deal
+  let company: string | null = null;
+  if (deal && deal !== "_unmatched") {
+    const { data: dealData } = await supabase
+      .from("deals")
+      .select("company")
+      .eq("user_id", user.id)
+      .eq("name", deal)
+      .single();
+    company = dealData?.company || null;
+  }
+
   const titleWords = title
     .replace(/[^a-zA-ZÀ-ÿ0-9\s]/g, " ")
     .split(/\s+/)
@@ -95,7 +107,11 @@ export async function POST(request: Request) {
     ? deal.replace(/[^a-zA-ZÀ-ÿ0-9\s]/g, " ").split(/\s+/).filter((w) => w.length > 2)
     : [];
 
-  const searchTerms = [...new Set([...titleWords, ...dealWords])];
+  const companyWords = company
+    ? company.replace(/[^a-zA-ZÀ-ÿ0-9\s]/g, " ").split(/\s+/).filter((w) => w.length > 2)
+    : [];
+
+  const searchTerms = [...new Set([...titleWords, ...dealWords, ...companyWords])];
 
   // Time windows: 7 days tight (attendee search) + 14 days wider (keyword search)
   const meetingDate = eventDate ? new Date(eventDate) : new Date();
@@ -251,7 +267,11 @@ export async function POST(request: Request) {
     ? `\nParticipants du meeting: ${attendees.join(", ")}`
     : "";
 
-  const prompt = `Tu prépares un briefing pour un meeting "${title}"${deal && deal !== "_unmatched" ? ` (projet: ${deal})` : ""}.${attendeeInfo}
+  const dealInfo = deal && deal !== "_unmatched"
+    ? ` (projet: ${deal}${company ? `, entreprise: ${company}` : ""})`
+    : "";
+
+  const prompt = `Tu prépares un briefing pour un meeting "${title}"${dealInfo}.${attendeeInfo}
 
 Voici les échanges récents (emails et messages Slack) avec les participants de ce meeting :
 

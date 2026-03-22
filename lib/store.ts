@@ -94,6 +94,7 @@ export const apiDeleteTask = async (id: string) => {
 export const apiAddDeal = async (deal: {
   name: string;
   color: string;
+  company?: string;
   keywords?: string[];
   sort_order?: number;
 }) => {
@@ -103,6 +104,16 @@ export const apiAddDeal = async (deal: {
     body: JSON.stringify(deal),
   });
   if (!res.ok) throw new Error(`Add deal API: ${res.status}`);
+  return res.json();
+};
+
+export const apiUpdateDeal = async (name: string, updates: { company?: string }) => {
+  const res = await fetch("/api/deals", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, ...updates }),
+  });
+  if (!res.ok) throw new Error(`Update deal API: ${res.status}`);
   return res.json();
 };
 

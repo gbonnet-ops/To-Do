@@ -19,6 +19,7 @@ export async function GET() {
     id: d.id,
     name: d.name,
     color: d.color,
+    company: d.company || "",
     keywords: d.keywords || [],
     sort_order: d.sort_order,
   }));
@@ -42,6 +43,7 @@ export async function POST(request: Request) {
       user_id: user.id,
       name,
       color: sanitizeString(body.color, 20) || "#888",
+      company: sanitizeString(body.company, 200) || null,
       keywords: body.keywords || [],
       sort_order: body.sort_order || 0,
     })
@@ -50,6 +52,29 @@ export async function POST(request: Request) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json(data, { status: 201 });
+}
+
+export async function PATCH(request: Request) {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const body = await request.json();
+  const { name, company } = body;
+
+  if (!name) return NextResponse.json({ error: "Missing deal name" }, { status: 400 });
+
+  const updates: Record<string, unknown> = {};
+  if (company !== undefined) updates.company = sanitizeString(company, 200) || null;
+
+  const { error } = await supabase
+    .from("deals")
+    .update(updates)
+    .eq("user_id", user.id)
+    .eq("name", name);
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true });
 }
 
 export async function DELETE(request: Request) {
