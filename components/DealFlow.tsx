@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Task, Deal, CalendarEvent, StatusMessage, ViewType } from "@/lib/types";
+import { Task, Deal, CalendarEvent, EmailSuggestion, StatusMessage, ViewType } from "@/lib/types";
 import { DEFAULT_DEALS } from "@/lib/constants";
-import { uid, todayStr, isOverdue, isToday, greet } from "@/lib/utils";
+import { uid, todayStr, isOverdue, isToday, greet, getWeekDays, formatDeadline } from "@/lib/utils";
 import { loadTasks, saveTasks, loadDeals, saveDeals } from "@/lib/store";
 import QuickAdd from "./QuickAdd";
 import SettingsPanel from "./SettingsPanel";
@@ -33,8 +33,12 @@ export default function DealFlow() {
   const [view, setView] = useState<ViewType>("focus");
   const [showDone, setShowDone] = useState(false);
   const [weekOffset, setWeekOffset] = useState(0);
-  const [calEvents] = useState<CalendarEvent[]>([]);
-  const [pushingId] = useState<string | null>(null);
+  const [calEvents, setCalEvents] = useState<CalendarEvent[]>([]);
+  const [calLoading, setCalLoading] = useState(false);
+  const [calLastFetch, setCalLastFetch] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<EmailSuggestion[]>([]);
+  const [scanLoading, setScanLoading] = useState(false);
+  const [pushingId, setPushingId] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<StatusMessage | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const mobile = useIsMobile();
@@ -59,6 +63,105 @@ export default function DealFlow() {
 
   // Recent assignees
   const recentAssignees = [...new Set(tasks.map((t) => t.assignee).filter(Boolean))] as string[];
+
+  // ── Calendar sync ──
+  const syncCalendar = useCallback(async () => {
+    setCalLoading(true);
+    setStatusMsg({ type: "info", text: "Sync Calendar en cours..." });
+    try {
+      const week = getWeekDays(weekOffset);
+      const week2 = getWeekDays(weekOffset + 1);
+      const start = week[0].date;
+      const end = week2[6].date;
+
+      const res = await fetch(`/api/calendar?start=${start}&end=${end}`);
+      if (!res.ok) throw new Error(`Calendar API: ${res.status}`);
+      const events: CalendarEvent[] = await res.json();
+
+      setCalEvents(events);
+      setCalLastFetch(new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }));
+      setStatusMsg({ type: "ok", text: `${events.length} meeting${events.length !== 1 ? "s" : ""} deal` });
+    } catch (e) {
+      setStatusMsg({ type: "error", text: `Calendar: ${e instanceof Error ? e.message : "erreur"}` });
+    }
+    setCalLoading(false);
+    setTimeout(() => setStatusMsg(null), 5000);
+  }, [weekOffset]);
+
+  // ── Gmail scan ──
+  const scanEmails = useCallback(async () => {
+    setScanLoading(true);
+    setStatusMsg({ type: "info", text: "Scan Gmail en cours..." });
+    try {
+      const res = await fetch("/api/gmail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          existingTasks: tasks.filter((t) => !t.done).slice(0, 15).map((t) => t.text),
+          dealNames: DEALS,
+        }),
+      });
+      if (!res.ok) throw new Error(`Gmail API: ${res.status}`);
+      const results: EmailSuggestion[] = await res.json();
+      setSuggestions(results);
+      setStatusMsg(results.length > 0
+        ? { type: "ok", text: `${results.length} suggestion${results.length > 1 ? "s" : ""} trouvée${results.length > 1 ? "s" : ""}` }
+        : { type: "ok", text: "Aucune nouvelle tâche détectée" }
+      );
+    } catch (e) {
+      setStatusMsg({ type: "error", text: `Gmail: ${e instanceof Error ? e.message : "erreur"}` });
+    }
+    setScanLoading(false);
+    setTimeout(() => setStatusMsg(null), 5000);
+  }, [tasks, DEALS]);
+
+  // ── Accept/dismiss suggestions ──
+  const acceptSuggestion = useCallback((idx: number) => {
+    const s = suggestions[idx];
+    if (!s) return;
+    setTasks((p) => [{
+      id: uid(), text: s.text, deal: s.deal || "Perso",
+      priority: s.priority || "medium", deadline: s.deadline || null,
+      assignee: s.assignee || null, done: false, created_at: new Date().toISOString(),
+    }, ...p]);
+    setSuggestions((p) => p.filter((_, i) => i !== idx));
+  }, [suggestions]);
+
+  const acceptAllSuggestions = useCallback(() => {
+    const newTasks = suggestions.map((s) => ({
+      id: uid(), text: s.text, deal: s.deal || "Perso",
+      priority: s.priority || "medium", deadline: s.deadline || null,
+      assignee: s.assignee || null, done: false, created_at: new Date().toISOString(),
+    }));
+    setTasks((p) => [...newTasks, ...p]);
+    setSuggestions([]);
+  }, [suggestions]);
+
+  // ── Push task deadline to calendar ──
+  const pushTaskToCalendar = useCallback(async (id: string) => {
+    const task = tasks.find((t) => t.id === id);
+    if (!task || !task.deadline) return;
+    setPushingId(id);
+    setStatusMsg({ type: "info", text: "Ajout au Calendar..." });
+    try {
+      const res = await fetch("/api/calendar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: task.text,
+          date: task.deadline,
+          description: `DealFlow task — ${task.deal} — Priority: ${task.priority}`,
+        }),
+      });
+      if (!res.ok) throw new Error(`Calendar push: ${res.status}`);
+      setTasks((p) => p.map((t) => t.id === id ? { ...t, synced: true } : t));
+      setStatusMsg({ type: "ok", text: "Ajouté au Calendar" });
+    } catch (e) {
+      setStatusMsg({ type: "error", text: `Push: ${e instanceof Error ? e.message : "erreur"}` });
+    }
+    setPushingId(null);
+    setTimeout(() => setStatusMsg(null), 4000);
+  }, [tasks]);
 
   // Task operations
   const addTask = useCallback((text: string, dealName: string, priority: "high" | "medium" | "low", deadline: string | null, assignee: string | null) => {
@@ -166,11 +269,40 @@ export default function DealFlow() {
           />
         )}
 
-        {/* Stats */}
+        {/* Stats + sync buttons */}
         <div className="flex gap-4 mb-3 items-center flex-wrap" style={{ fontSize: "12px" }}>
           <span style={{ color: "#64748B" }}>{openN} ouvertes</span>
           {overdueN > 0 && <span style={{ color: "#F87171" }}>{overdueN} en retard</span>}
           {todayN > 0 && <span style={{ color: "#FBBF24" }}>{todayN} aujourd&apos;hui</span>}
+          <span className="flex-1" />
+          {/* Sync buttons */}
+          <div className="flex gap-1.5 items-center">
+            <div
+              onClick={!calLoading ? syncCalendar : undefined}
+              className="flex items-center gap-[5px] rounded-md"
+              style={{
+                padding: "4px 10px", fontSize: "11px",
+                cursor: calLoading ? "wait" : "pointer",
+                color: "#818CF8", background: "rgba(129,140,248,0.08)",
+                opacity: calLoading ? 0.5 : 1,
+              }}
+            >
+              {calLoading ? "⏳" : "📅"} {calLoading ? "Sync..." : "Calendar"}
+            </div>
+            <div
+              onClick={!scanLoading ? scanEmails : undefined}
+              className="flex items-center gap-[5px] rounded-md"
+              style={{
+                padding: "4px 10px", fontSize: "11px",
+                cursor: scanLoading ? "wait" : "pointer",
+                color: "#34D399", background: "rgba(52,211,153,0.08)",
+                opacity: scanLoading ? 0.5 : 1,
+              }}
+            >
+              {scanLoading ? "⏳" : "📧"} {scanLoading ? "Scan..." : "Gmail"}
+            </div>
+            {calLastFetch && <span style={{ fontSize: "9px", color: "#27272A" }}>màj {calLastFetch}</span>}
+          </div>
         </div>
 
         {/* Status message */}
@@ -199,6 +331,64 @@ export default function DealFlow() {
             >
               ✕
             </span>
+          </div>
+        )}
+
+        {/* ── EMAIL SUGGESTIONS ── */}
+        {suggestions.length > 0 && (
+          <div
+            className="rounded-[10px] mb-3"
+            style={{
+              background: "rgba(52,211,153,0.05)",
+              border: "1px solid rgba(52,211,153,0.12)",
+              padding: "10px 12px",
+            }}
+          >
+            <div className="flex justify-between items-center mb-2">
+              <span style={{ fontSize: "11px", fontWeight: 500, color: "#34D399" }}>
+                📧 {suggestions.length} tâche{suggestions.length > 1 ? "s" : ""} suggérée{suggestions.length > 1 ? "s" : ""} depuis Gmail
+              </span>
+              <div className="flex gap-2">
+                <span onClick={acceptAllSuggestions} className="cursor-pointer" style={{ fontSize: "10px", color: "#34D399" }}>
+                  Tout accepter
+                </span>
+                <span onClick={() => setSuggestions([])} className="cursor-pointer" style={{ fontSize: "10px", color: "#52525B" }}>
+                  Tout ignorer
+                </span>
+              </div>
+            </div>
+            {suggestions.map((s, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-2"
+                style={{ padding: "8px 0", borderTop: i > 0 ? "1px solid rgba(255,255,255,0.03)" : "none" }}
+              >
+                <div className="flex-1 min-w-0">
+                  <div style={{ fontSize: "13px", color: "#CBD5E1", marginBottom: "3px" }}>{s.text}</div>
+                  <div className="flex gap-1.5 items-center flex-wrap">
+                    {s.deal && <span style={{ fontSize: "10px", color: DEAL_DOT[s.deal] || "#64748B" }}>{s.deal}</span>}
+                    {s.priority === "high" && <span style={{ fontSize: "10px", color: "#F87171" }}>▲</span>}
+                    {s.deadline && <span style={{ fontSize: "10px", color: "#64748B" }}>{formatDeadline(s.deadline)}</span>}
+                    {s.assignee && <span style={{ fontSize: "10px", color: "#A78BFA" }}>{s.assignee}</span>}
+                    {s.source && <span style={{ fontSize: "9px", color: "#27272A" }}>← {s.source}</span>}
+                  </div>
+                </div>
+                <div
+                  onClick={() => acceptSuggestion(i)}
+                  className="cursor-pointer rounded-md"
+                  style={{ padding: "5px 10px", fontSize: "11px", color: "#34D399", background: "rgba(52,211,153,0.1)" }}
+                >
+                  ✓
+                </div>
+                <div
+                  onClick={() => setSuggestions((p) => p.filter((_, j) => j !== i))}
+                  className="cursor-pointer rounded-md"
+                  style={{ padding: "5px 8px", fontSize: "11px", color: "#52525B" }}
+                >
+                  ✕
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
@@ -320,6 +510,7 @@ export default function DealFlow() {
                 onChangeDeal={changeDeal}
                 onChangePriority={changePri}
                 onChangeAssignee={changeAssignee}
+                onPushCalendar={pushTaskToCalendar}
               />
             )}
 
@@ -338,6 +529,7 @@ export default function DealFlow() {
                 onChangeDeal={changeDeal}
                 onChangePriority={changePri}
                 onChangeAssignee={changeAssignee}
+                onPushCalendar={pushTaskToCalendar}
               />
             )}
           </>
@@ -361,6 +553,7 @@ export default function DealFlow() {
             onChangeDeal={changeDeal}
             onChangePriority={changePri}
             onChangeAssignee={changeAssignee}
+            onPushCalendar={pushTaskToCalendar}
           />
         )}
 
@@ -379,6 +572,7 @@ export default function DealFlow() {
             onChangeDeal={changeDeal}
             onChangePriority={changePri}
             onChangeAssignee={changeAssignee}
+            onPushCalendar={pushTaskToCalendar}
           />
         )}
       </div>
