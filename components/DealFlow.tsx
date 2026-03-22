@@ -173,20 +173,13 @@ export default function DealFlow() {
       const allKeys = events.map((e) => calEventKey(e.title, e.start));
       const newEvents = events.filter((e) => !seenSet.has(calEventKey(e.title, e.start)));
 
-      if (newEvents.length > 0 && seenKeys.length > 0) {
-        // Only show prep suggestions if we already had a baseline (not first load ever)
-        const preps: MeetingPrepSuggestion[] = newEvents.map((e) => ({
-          eventKey: calEventKey(e.title, e.start),
-          title: e.title,
-          date: e.date,
-          start: e.start,
-          deal: e.deal || null,
-        }));
-        setMeetingPreps(preps);
-      }
-
       // Save all current event keys as seen
       saveSeenCalendarKeys(allKeys);
+
+      if (newEvents.length > 0 && seenKeys.length > 0) {
+        // Ask AI for prep suggestions based on emails + meeting context
+        fetchMeetingPreps(newEvents);
+      }
 
       setStatusMsg({ type: "ok", text: `${events.length} meeting${events.length !== 1 ? "s" : ""} deal` });
     } catch (e) {
@@ -218,8 +211,11 @@ export default function DealFlow() {
       if (data.scannedIds) {
         saveScannedGmailIds(data.scannedIds);
       }
-      setSuggestions(results);
-      setStatusMsg(results.length > 0
+      // Deduplicate: remove Gmail suggestions that overlap with existing meeting prep suggestions
+      const prepTexts = new Set(meetingPreps.map((p) => p.text.toLowerCase()));
+      const deduped = results.filter((s) => !prepTexts.has(s.text.toLowerCase()));
+      setSuggestions(deduped);
+      setStatusMsg(deduped.length > 0
         ? { type: "ok", text: `${results.length} suggestion${results.length > 1 ? "s" : ""} trouvée${results.length > 1 ? "s" : ""}` }
         : { type: "ok", text: "Aucune nouvelle tâche détectée" }
       );
@@ -228,7 +224,7 @@ export default function DealFlow() {
     }
     setScanLoading(false);
     setTimeout(() => setStatusMsg(null), 5000);
-  }, [tasks, DEALS]);
+  }, [tasks, DEALS, meetingPreps]);
 
   // ── Accept/dismiss suggestions ──
   const acceptSuggestion = useCallback((idx: number) => {
@@ -278,23 +274,74 @@ export default function DealFlow() {
     setCompletionSuggestions([]);
   }, [completionSuggestions]);
 
-  // ── Meeting prep: create prep task from suggestion ──
-  const addPrepTask = useCallback((prep: MeetingPrepSuggestion, prepText: string) => {
+  // ── Meeting prep: fetch AI suggestions for new events ──
+  const fetchMeetingPreps = useCallback(async (newEvents: CalendarEvent[]) => {
+    try {
+      const res = await fetch("/api/calendar/prep", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          newEvents: newEvents.map((e) => ({
+            title: e.title,
+            date: e.date,
+            start: e.start,
+            deal: e.deal === "_unmatched" ? null : e.deal,
+          })),
+          existingTasks: tasks.filter((t) => !t.done).slice(0, 20).map((t) => t.text),
+          dealNames: DEALS,
+        }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const preps: MeetingPrepSuggestion[] = data.prepSuggestions || [];
+      if (preps.length > 0) {
+        // Deduplicate against current Gmail suggestions
+        const gmailTexts = new Set(suggestions.map((s) => s.text.toLowerCase()));
+        const filtered = preps.filter((p) => !gmailTexts.has(p.text.toLowerCase()));
+        if (filtered.length > 0) setMeetingPreps(filtered);
+      }
+    } catch {
+      // Silent fail — non-critical
+    }
+  }, [tasks, DEALS, suggestions]);
+
+  // ── Accept a meeting prep suggestion as a task ──
+  const acceptPrep = useCallback((idx: number) => {
+    const prep = meetingPreps[idx];
+    if (!prep) return;
     const id = uid();
     const task: Task = {
       id,
-      text: prepText || `Préparer : ${prep.title}`,
+      text: prep.text,
       deal: prep.deal || "Perso",
-      priority: "high",
-      deadline: prep.date,
+      priority: prep.priority || "high",
+      deadline: prep.deadline || null,
       assignee: null,
       done: false,
       created_at: new Date().toISOString(),
     };
     setTasks((p) => [task, ...p]);
-    setMeetingPreps((p) => p.filter((m) => m.eventKey !== prep.eventKey));
+    setMeetingPreps((p) => p.filter((_, i) => i !== idx));
     apiAddTask({ id, text: task.text, deal: task.deal, priority: task.priority, deadline: task.deadline, assignee: task.assignee, source: "calendar-prep" }).catch(() => {});
-  }, []);
+  }, [meetingPreps]);
+
+  const acceptAllPreps = useCallback(() => {
+    const newTasks = meetingPreps.map((prep) => ({
+      id: uid(),
+      text: prep.text,
+      deal: prep.deal || "Perso",
+      priority: prep.priority || ("high" as const),
+      deadline: prep.deadline || null,
+      assignee: null,
+      done: false,
+      created_at: new Date().toISOString(),
+    }));
+    setTasks((p) => [...newTasks, ...p]);
+    setMeetingPreps([]);
+    for (const t of newTasks) {
+      apiAddTask({ id: t.id, text: t.text, deal: t.deal, priority: t.priority, deadline: t.deadline, assignee: t.assignee, source: "calendar-prep" }).catch(() => {});
+    }
+  }, [meetingPreps]);
 
   // ── Push task deadline to calendar ──
   const pushTaskToCalendar = useCallback(async (id: string) => {
@@ -592,34 +639,41 @@ export default function DealFlow() {
           >
             <div className="flex justify-between items-center mb-2">
               <span style={{ fontSize: "11px", fontWeight: 500, color: "#FBBF24" }}>
-                📅 {meetingPreps.length} nouveau{meetingPreps.length > 1 ? "x" : ""} meeting{meetingPreps.length > 1 ? "s" : ""} — action à prévoir ?
+                📅 {meetingPreps.length} préparation{meetingPreps.length > 1 ? "s" : ""} suggérée{meetingPreps.length > 1 ? "s" : ""} pour vos meetings
               </span>
-              <span onClick={() => setMeetingPreps([])} className="cursor-pointer" style={{ fontSize: "10px", color: "#52525B" }}>
-                Ignorer tout
-              </span>
+              <div className="flex gap-2">
+                <span onClick={acceptAllPreps} className="cursor-pointer" style={{ fontSize: "10px", color: "#FBBF24" }}>
+                  Tout accepter
+                </span>
+                <span onClick={() => setMeetingPreps([])} className="cursor-pointer" style={{ fontSize: "10px", color: "#52525B" }}>
+                  Ignorer tout
+                </span>
+              </div>
             </div>
             {meetingPreps.map((m, i) => (
               <div
-                key={m.eventKey}
+                key={i}
                 className="flex items-center gap-2"
                 style={{ padding: "8px 0", borderTop: i > 0 ? "1px solid rgba(255,255,255,0.03)" : "none" }}
               >
                 <div className="flex-1 min-w-0">
-                  <div style={{ fontSize: "13px", color: "#CBD5E1", marginBottom: "3px" }}>{m.title}</div>
-                  <div className="flex gap-1.5 items-center">
+                  <div style={{ fontSize: "13px", color: "#CBD5E1", marginBottom: "3px" }}>{m.text}</div>
+                  <div className="flex gap-1.5 items-center flex-wrap">
                     {m.deal && <span style={{ fontSize: "10px", color: DEAL_DOT[m.deal] || "#64748B" }}>{m.deal}</span>}
-                    <span style={{ fontSize: "10px", color: "#FBBF24" }}>{formatDeadline(m.date)}</span>
+                    {m.priority === "high" && <span style={{ fontSize: "10px", color: "#F87171" }}>▲</span>}
+                    {m.deadline && <span style={{ fontSize: "10px", color: "#64748B" }}>{formatDeadline(m.deadline)}</span>}
+                    {m.source && <span style={{ fontSize: "9px", color: "#92702D" }}>← {m.source}</span>}
                   </div>
                 </div>
                 <div
-                  onClick={() => addPrepTask(m, "")}
+                  onClick={() => acceptPrep(i)}
                   className="cursor-pointer rounded-md"
                   style={{ padding: "5px 10px", fontSize: "11px", color: "#FBBF24", background: "rgba(251,191,36,0.1)" }}
                 >
-                  + Préparer
+                  ✓
                 </div>
                 <div
-                  onClick={() => setMeetingPreps((p) => p.filter((x) => x.eventKey !== m.eventKey))}
+                  onClick={() => setMeetingPreps((p) => p.filter((_, j) => j !== i))}
                   className="cursor-pointer rounded-md"
                   style={{ padding: "5px 8px", fontSize: "11px", color: "#52525B" }}
                 >

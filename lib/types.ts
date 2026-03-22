@@ -52,11 +52,12 @@ export interface CompletionSuggestion {
 }
 
 export interface MeetingPrepSuggestion {
-  eventKey: string; // unique key: title+start
-  title: string;
-  date: string;
-  start: string;
+  meetingTitle: string;
+  text: string;
   deal: string | null;
+  priority: "high" | "medium";
+  deadline: string | null;
+  source: string;
 }
 
 export type ViewType = "focus" | "all" | "week" | "team";
