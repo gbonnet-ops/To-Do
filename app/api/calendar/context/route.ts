@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getGoogleTokens, googleFetch } from "@/lib/google";
-import { getSlackTokens, searchSlackMessages } from "@/lib/slack";
+import { getSlackTokens, searchSlackWithContext } from "@/lib/slack";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { rateLimit } from "@/lib/rate-limit";
 
@@ -168,23 +168,25 @@ export async function POST(request: Request) {
       } catch { /* skip */ }
     }
 
-    // Slack search: attendee names + keywords
+    // Slack search: channels + DMs + keyword fallback
     if (slackTokens) {
       try {
         const names = attendeeNames(attendees);
-        // Search by attendee name + keywords (e.g. "jean alpha")
-        const slackTerms = [...names.slice(0, 2), ...allKeywords.slice(0, 2)].filter(Boolean);
-        if (slackTerms.length > 0) {
-          const slackResults = await searchSlackMessages(slackTokens, slackTerms, 3);
-          for (const msg of slackResults) {
-            allMessages.push({
-              eventKey: event.key,
-              source: "slack",
-              from: msg.from,
-              subject: `#${msg.channel}`,
-              body: msg.text.slice(0, 400),
-            });
-          }
+        const slackResults = await searchSlackWithContext(slackTokens, {
+          keywords: allKeywords,
+          dealName: dealName,
+          companyName: company,
+          attendeeNames: names,
+          maxResults: 5,
+        });
+        for (const msg of slackResults) {
+          allMessages.push({
+            eventKey: event.key,
+            source: "slack",
+            from: msg.from,
+            subject: `#${msg.channel}`,
+            body: msg.text.slice(0, 400),
+          });
         }
       } catch { /* skip */ }
     }

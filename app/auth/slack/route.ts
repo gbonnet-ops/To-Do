@@ -11,8 +11,8 @@ export async function GET(request: Request) {
   const { origin } = new URL(request.url);
   const redirectUri = `${origin}/auth/slack/callback`;
 
-  // user scope: search:read lets us search messages the user can see
-  const scopes = "search:read";
+  // user scopes: search messages, list channels & members, read user profiles
+  const scopes = "search:read,channels:read,groups:read,users:read";
 
   const slackUrl = new URL("https://slack.com/oauth/v2/authorize");
   slackUrl.searchParams.set("client_id", clientId);

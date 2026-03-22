@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getGoogleTokens, googleFetch } from "@/lib/google";
-import { getSlackTokens, searchSlackMessages } from "@/lib/slack";
+import { getSlackTokens, searchSlackWithContext } from "@/lib/slack";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { rateLimit } from "@/lib/rate-limit";
 
@@ -190,66 +190,28 @@ export async function POST(request: Request) {
     } catch { /* skip */ }
   }
 
-  // Slack search — multiple strategies
+  // Slack search — smart channel + DM + keyword strategy
   if (slackTokens) {
     const names = attendeeNames(attendees);
 
-    // 1. Attendee names + keywords
-    if (names.length > 0 && searchTerms.length > 0) {
-      try {
-        const terms = [...names.slice(0, 2), ...searchTerms.slice(0, 2)];
-        const results = await searchSlackMessages(slackTokens, terms, 5);
-        for (const msg of results) {
-          allSources.push({
-            source: "slack",
-            from: msg.from,
-            date: msg.date,
-            subject: `#${msg.channel}`,
-            body: msg.text.slice(0, 600),
-          });
-        }
-      } catch { /* skip */ }
-    }
-
-    // 2. Keywords only on Slack
-    if (searchTerms.length > 0) {
-      try {
-        const existingSlackBodies = new Set(allSources.filter((s) => s.source === "slack").map((s) => s.body));
-        const results = await searchSlackMessages(slackTokens, searchTerms, 5);
-        for (const msg of results) {
-          const body = msg.text.slice(0, 600);
-          if (!existingSlackBodies.has(body)) {
-            allSources.push({
-              source: "slack",
-              from: msg.from,
-              date: msg.date,
-              subject: `#${msg.channel}`,
-              body,
-            });
-          }
-        }
-      } catch { /* skip */ }
-    }
-
-    // 3. Deal name on Slack
-    if (dealWords.length > 0) {
-      try {
-        const existingSlackBodies = new Set(allSources.filter((s) => s.source === "slack").map((s) => s.body));
-        const results = await searchSlackMessages(slackTokens, dealWords, 3);
-        for (const msg of results) {
-          const body = msg.text.slice(0, 600);
-          if (!existingSlackBodies.has(body)) {
-            allSources.push({
-              source: "slack",
-              from: msg.from,
-              date: msg.date,
-              subject: `#${msg.channel}`,
-              body,
-            });
-          }
-        }
-      } catch { /* skip */ }
-    }
+    try {
+      const slackResults = await searchSlackWithContext(slackTokens, {
+        keywords: searchTerms,
+        dealName: deal && deal !== "_unmatched" ? deal : null,
+        companyName: company,
+        attendeeNames: names,
+        maxResults: 12,
+      });
+      for (const msg of slackResults) {
+        allSources.push({
+          source: "slack",
+          from: msg.from,
+          date: msg.date,
+          subject: `#${msg.channel}`,
+          body: msg.text.slice(0, 600),
+        });
+      }
+    } catch { /* skip */ }
   }
 
   if (allSources.length === 0) return NextResponse.json({ context: null });
