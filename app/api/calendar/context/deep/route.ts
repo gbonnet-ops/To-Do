@@ -59,6 +59,16 @@ function attendeeNames(attendees: string[]): string[] {
     .slice(0, 4);
 }
 
+/** Build project email address from deal name: "Mon Projet" → "monprojet@clipperton.net" */
+function projectEmail(dealName: string | null | undefined): string | null {
+  if (!dealName || dealName === "_unmatched") return null;
+  const slug = dealName
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+  return slug ? `${slug}@clipperton.net` : null;
+}
+
 // POST /api/calendar/context/deep — Generate a detailed context for a single meeting
 export async function POST(request: Request) {
   const supabase = await createServerSupabaseClient();
@@ -125,6 +135,15 @@ export async function POST(request: Request) {
 
   // Strategy: prioritized Gmail queries
   const gmailQueries: Array<{ query: string; max: number }> = [];
+
+  // 0. Project email address (e.g. monprojet@clipperton.net) — highest priority
+  const projEmail = projectEmail(deal);
+  if (projEmail) {
+    gmailQueries.push({
+      query: `after:${wideEpoch} from:${projEmail} OR to:${projEmail}`,
+      max: 8,
+    });
+  }
 
   // 1. Emails with attendees + keywords (most relevant)
   if (attendees.length > 0 && searchTerms.length > 0) {

@@ -52,6 +52,16 @@ function extractKeywords(title: string): string[] {
     .slice(0, 4);
 }
 
+/** Build project email address from deal name: "Mon Projet" → "monprojet@clipperton.net" */
+function projectEmail(dealName: string | null): string | null {
+  if (!dealName) return null;
+  const slug = dealName
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // remove accents
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, ""); // remove spaces, hyphens, etc.
+  return slug ? `${slug}@clipperton.net` : null;
+}
+
 /** Extract first name or short identifier from email for Slack search */
 function attendeeNames(attendees: string[]): string[] {
   return attendees
@@ -125,6 +135,12 @@ export async function POST(request: Request) {
 
     // Build targeted Gmail queries:
     const gmailQueries: string[] = [];
+
+    // Project email address (e.g. monprojet@clipperton.net)
+    const projEmail = projectEmail(dealName);
+    if (projEmail) {
+      gmailQueries.push(`after:${afterEpoch} from:${projEmail} OR to:${projEmail}`);
+    }
 
     if (attendees.length > 0 && allKeywords.length > 0) {
       const attendeeFilter = attendees.slice(0, 3).map((e) => `from:${e} OR to:${e}`).join(" OR ");
