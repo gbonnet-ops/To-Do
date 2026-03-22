@@ -9,6 +9,7 @@ import {
   fetchTasks, fetchDeals,
   apiAddTask, apiUpdateTask, apiDeleteTask,
   apiAddDeal, apiDeleteDeal,
+  loadScannedGmailIds, saveScannedGmailIds,
 } from "@/lib/store";
 import QuickAdd from "./QuickAdd";
 import SettingsPanel from "./SettingsPanel";
@@ -143,16 +144,23 @@ export default function DealFlow() {
     setScanLoading(true);
     setStatusMsg({ type: "info", text: "Scan Gmail en cours..." });
     try {
+      const scannedIds = loadScannedGmailIds();
       const res = await fetch("/api/gmail", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           existingTasks: tasks.filter((t) => !t.done).slice(0, 15).map((t) => t.text),
           dealNames: DEALS,
+          scannedIds,
         }),
       });
       if (!res.ok) throw new Error(`Gmail API: ${res.status}`);
-      const results: EmailSuggestion[] = await res.json();
+      const data = await res.json();
+      // New format: { suggestions, scannedIds }
+      const results: EmailSuggestion[] = data.suggestions || data;
+      if (data.scannedIds) {
+        saveScannedGmailIds(data.scannedIds);
+      }
       setSuggestions(results);
       setStatusMsg(results.length > 0
         ? { type: "ok", text: `${results.length} suggestion${results.length > 1 ? "s" : ""} trouvée${results.length > 1 ? "s" : ""}` }

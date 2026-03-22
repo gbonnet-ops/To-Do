@@ -106,6 +106,43 @@ export const apiAddDeal = async (deal: {
   return res.json();
 };
 
+// ── Gmail scanned IDs (daily memory) ──
+
+const GMAIL_SCANNED_KEY = "dealflow-gmail-scanned";
+
+interface GmailScannedData {
+  date: string; // YYYY-MM-DD
+  ids: string[];
+}
+
+export const loadScannedGmailIds = (): string[] => {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(GMAIL_SCANNED_KEY);
+    if (!raw) return [];
+    const data: GmailScannedData = JSON.parse(raw);
+    const today = new Date().toISOString().slice(0, 10);
+    // Reset if not from today
+    if (data.date !== today) {
+      localStorage.removeItem(GMAIL_SCANNED_KEY);
+      return [];
+    }
+    return data.ids;
+  } catch {
+    return [];
+  }
+};
+
+export const saveScannedGmailIds = (ids: string[]) => {
+  if (typeof window === "undefined") return;
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    localStorage.setItem(GMAIL_SCANNED_KEY, JSON.stringify({ date: today, ids }));
+  } catch (e) {
+    console.error("Save scanned gmail ids failed:", e);
+  }
+};
+
 export const apiDeleteDeal = async (name: string) => {
   const res = await fetch(`/api/deals?name=${encodeURIComponent(name)}`, {
     method: "DELETE",

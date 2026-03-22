@@ -41,6 +41,29 @@ function getHeader(msg: GmailMessageDetail, name: string): string {
   return msg.payload?.headers?.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value || "";
 }
 
+/** Fetch all message IDs matching a query, paginating through results */
+async function fetchAllMessageIds(
+  query: string,
+  tokens: { access_token: string; refresh_token?: string }
+): Promise<GmailMessage[]> {
+  const all: GmailMessage[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const url = new URL("https://www.googleapis.com/gmail/v1/users/me/messages");
+    url.searchParams.set("q", query);
+    url.searchParams.set("maxResults", "100");
+    if (pageToken) url.searchParams.set("pageToken", pageToken);
+
+    const data = await googleFetch(url.toString(), tokens);
+    const messages: GmailMessage[] = data.messages || [];
+    all.push(...messages);
+    pageToken = data.nextPageToken;
+  } while (pageToken);
+
+  return all;
+}
+
 // POST /api/gmail — Scan inbox and extract task suggestions via Claude API
 export async function POST(request: Request) {
   const tokens = await getGoogleTokens();
@@ -49,35 +72,45 @@ export async function POST(request: Request) {
   const body = await request.json();
   const existingTasks: string[] = body.existingTasks || [];
   const dealNames: string[] = body.dealNames || [];
+  const scannedIds: string[] = body.scannedIds || [];
+  const scannedSet = new Set(scannedIds);
 
-  // Fetch recent messages (last 3 days)
-  const threeDaysAgo = Math.floor((Date.now() - 3 * 86400000) / 1000);
-  const listData = await googleFetch(
-    `https://www.googleapis.com/gmail/v1/users/me/messages?` +
-    `q=after:${threeDaysAgo}&maxResults=15`,
-    tokens
-  );
+  // Fetch all messages from today
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const afterEpoch = Math.floor(todayStart.getTime() / 1000);
 
-  const messageIds: GmailMessage[] = listData.messages || [];
-  if (messageIds.length === 0) {
-    return NextResponse.json([]);
+  const allIds = await fetchAllMessageIds(`after:${afterEpoch}`, tokens);
+
+  // Filter out already-scanned emails
+  const newIds = allIds.filter((m) => !scannedSet.has(m.id));
+
+  if (newIds.length === 0) {
+    return NextResponse.json({ suggestions: [], scannedIds: allIds.map((m) => m.id) });
   }
 
-  // Fetch message details (max 10)
-  const messages = await Promise.all(
-    messageIds.slice(0, 10).map(async (m) => {
-      const detail: GmailMessageDetail = await googleFetch(
-        `https://www.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=full`,
-        tokens
-      );
-      return {
-        id: m.id,
-        subject: getHeader(detail, "Subject"),
-        from: getHeader(detail, "From"),
-        body: extractBody(detail).slice(0, 1000), // Limit body size
-      };
-    })
-  );
+  // Fetch message details in batches of 15 to avoid overload
+  const BATCH_SIZE = 15;
+  const allMessages: Array<{ id: string; subject: string; from: string; body: string }> = [];
+
+  for (let i = 0; i < newIds.length; i += BATCH_SIZE) {
+    const batch = newIds.slice(i, i + BATCH_SIZE);
+    const batchResults = await Promise.all(
+      batch.map(async (m) => {
+        const detail: GmailMessageDetail = await googleFetch(
+          `https://www.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=full`,
+          tokens
+        );
+        return {
+          id: m.id,
+          subject: getHeader(detail, "Subject"),
+          from: getHeader(detail, "From"),
+          body: extractBody(detail).slice(0, 1000),
+        };
+      })
+    );
+    allMessages.push(...batchResults);
+  }
 
   // Send to OpenAI API for task extraction
   const openaiKey = process.env.OPENAI_API_KEY;
@@ -86,7 +119,7 @@ export async function POST(request: Request) {
   }
 
   const existingDesc = existingTasks.slice(0, 15).join("; ");
-  const emailSummary = messages
+  const emailSummary = allMessages
     .map((m, i) => `Email ${i + 1}:\nFrom: ${m.from}\nSubject: ${m.subject}\nBody: ${m.body}\n---`)
     .join("\n");
 
@@ -129,15 +162,20 @@ Only include actionable items. Max 8 suggestions. No markdown, no explanation, j
   const openaiData = await openaiRes.json();
   const textContent = openaiData.choices?.[0]?.message?.content || "";
 
-  // Parse JSON from OpenAI's response
+  // Return all scanned IDs (old + new) so client can persist them
+  const allScannedIds = [...scannedIds, ...newIds.map((m) => m.id)];
+
   try {
     const cleaned = textContent.replace(/```json|```/g, "").trim();
     const start = cleaned.search(/[\[{]/);
     const end = Math.max(cleaned.lastIndexOf("]"), cleaned.lastIndexOf("}"));
-    if (start === -1 || end === -1) return NextResponse.json([]);
+    if (start === -1 || end === -1) return NextResponse.json({ suggestions: [], scannedIds: allScannedIds });
     const suggestions = JSON.parse(cleaned.slice(start, end + 1));
-    return NextResponse.json(Array.isArray(suggestions) ? suggestions : []);
+    return NextResponse.json({
+      suggestions: Array.isArray(suggestions) ? suggestions : [],
+      scannedIds: allScannedIds,
+    });
   } catch {
-    return NextResponse.json([]);
+    return NextResponse.json({ suggestions: [], scannedIds: allScannedIds });
   }
 }
