@@ -160,8 +160,8 @@ export async function POST(request: Request) {
     });
   }
 
-  // 2. Recent threads with attendees (conversations leading up to meeting)
-  if (attendees.length > 0) {
+  // 2. Recent threads with attendees (only when no deal — otherwise too broad)
+  if (attendees.length > 0 && (!deal || deal === "_unmatched")) {
     const attendeeFilter = attendees.slice(0, 4).map((e) => `from:${e} OR to:${e}`).join(" OR ");
     gmailQueries.push({
       query: `after:${tightEpoch} (${attendeeFilter})`,
@@ -275,7 +275,10 @@ Voici les échanges récents (emails et messages Slack) avec les participants de
 
 ${sourceText}
 
-IMPORTANT: Base-toi UNIQUEMENT sur le contenu concret des messages ci-dessus. Ne fais PAS de suppositions sur le projet en général. Résume ce qui a été dit/demandé/décidé récemment par les participants.
+IMPORTANT:
+- Base-toi UNIQUEMENT sur le contenu concret des messages ci-dessus. Ne fais PAS de suppositions sur le projet en général.
+- Si le meeting est lié à un projet spécifique, IGNORE les messages qui parlent d'un AUTRE projet. Ne mélange jamais les projets.
+- Résume ce qui a été dit/demandé/décidé récemment par les participants.
 
 Génère un briefing de préparation concis mais complet en français (3-6 lignes max). Inclus :
 - Ce dont les participants ont discuté récemment (sujets concrets)

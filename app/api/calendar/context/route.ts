@@ -153,7 +153,9 @@ export async function POST(request: Request) {
       const attendeeFilter = attendees.slice(0, 3).map((e) => `from:${e} OR to:${e}`).join(" OR ");
       gmailQueries.push(`after:${afterEpoch} (${attendeeFilter}) ${allKeywords.join(" ")}`);
     }
-    if (attendees.length > 0) {
+    // Only use attendee-only query when there's no deal — otherwise it pulls
+    // emails from other projects that happen to share the same participants
+    if (attendees.length > 0 && !dealName) {
       const attendeeFilter = attendees.slice(0, 3).map((e) => `from:${e} OR to:${e}`).join(" OR ");
       gmailQueries.push(`after:${afterEpoch} (${attendeeFilter})`);
     }
@@ -257,7 +259,10 @@ export async function POST(request: Request) {
 
 ${eventSummaries}
 
-IMPORTANT: base-toi uniquement sur le contenu réel des messages, pas sur des suppositions. Si les messages ne donnent pas de contexte spécifique au meeting, ne pas inclure la clé.
+RÈGLES CRITIQUES:
+- Base-toi uniquement sur le contenu réel des messages, pas sur des suppositions.
+- Si un meeting est associé à un projet (ex: "Otrera"), IGNORE les messages qui parlent d'un AUTRE projet (ex: "Darwin", "Nova", etc.). Ne mélange JAMAIS les projets.
+- Si les messages fournis ne sont pas pertinents au meeting ou parlent d'un autre projet, ne pas inclure la clé dans le résultat.
 
 Return ONLY a valid JSON object where keys are the meeting keys and values are the short context strings in French.
 Example: {"title|2025-03-20T10:00:00": "Jean demande validation du contrat avant vendredi"}
