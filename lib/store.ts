@@ -190,6 +190,43 @@ export const saveSeenCalendarKeys = (keys: string[]) => {
   }
 };
 
+// ── Calendar event context cache ──
+
+const CAL_CONTEXT_KEY = "dealflow-cal-context";
+
+interface CalContextCache {
+  date: string;
+  contexts: Record<string, string>; // eventKey -> context summary
+}
+
+export const loadCalContexts = (): Record<string, string> => {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(CAL_CONTEXT_KEY);
+    if (!raw) return {};
+    const data: CalContextCache = JSON.parse(raw);
+    const today = new Date().toISOString().slice(0, 10);
+    const yesterday = yesterdayStr();
+    if (data.date !== today && data.date !== yesterday) {
+      localStorage.removeItem(CAL_CONTEXT_KEY);
+      return {};
+    }
+    return data.contexts;
+  } catch {
+    return {};
+  }
+};
+
+export const saveCalContexts = (contexts: Record<string, string>) => {
+  if (typeof window === "undefined") return;
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    localStorage.setItem(CAL_CONTEXT_KEY, JSON.stringify({ date: today, contexts }));
+  } catch (e) {
+    console.error("Save cal contexts failed:", e);
+  }
+};
+
 export const apiDeleteDeal = async (name: string) => {
   const res = await fetch(`/api/deals?name=${encodeURIComponent(name)}`, {
     method: "DELETE",

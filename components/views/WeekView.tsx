@@ -3,6 +3,7 @@
 import { Task, CalendarEvent } from "@/lib/types";
 import { getWeekDays } from "@/lib/utils";
 import TaskRow from "@/components/TaskRow";
+import MeetingCard from "@/components/MeetingCard";
 
 interface WeekViewProps {
   tasks: Task[];
@@ -151,22 +152,9 @@ export default function WeekView({
                 {dayMeetings.length > 0 && (
                   <div className="w-[280px] flex-shrink-0" style={{ borderLeft: "1px solid rgba(255,255,255,0.04)", paddingLeft: "12px" }}>
                     {dayMeetings.map((e, i) => {
-                      const st = e.start ? new Date(e.start).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "";
-                      const en = e.end ? new Date(e.end).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "";
                       const evDot = e.deal && e.deal !== "_unmatched" ? dealDot[e.deal] || "#64748B" : "#3F3F46";
                       return (
-                        <div key={`cal-${i}`} className="flex items-start gap-2" style={{ padding: "6px 0" }}>
-                          <div className="flex-shrink-0 rounded-sm mt-0.5" style={{ width: 3, minHeight: 18, background: evDot, opacity: 0.5 }} />
-                          <div>
-                            <div style={{ fontSize: "12px", color: "#94A3B8", lineHeight: "1.3" }}>{e.title}</div>
-                            <div className="flex gap-1.5 items-center mt-0.5">
-                              <span style={{ fontSize: "10px", color: "#3F3F46" }}>{st}{en ? ` – ${en}` : ""}</span>
-                              {e.deal && e.deal !== "_unmatched" && (
-                                <span style={{ fontSize: "9px", color: evDot, opacity: 0.7 }}>{e.deal}</span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
+                        <MeetingCard key={`cal-${i}`} event={e} dotColor={evDot} mobile={false} />
                       );
                     })}
                   </div>
@@ -181,20 +169,9 @@ export default function WeekView({
                   <TaskRow key={task.id} task={task} {...taskRowProps} />
                 ))}
                 {dayMeetings.map((e, i) => {
-                  const st = e.start ? new Date(e.start).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "";
-                  const en = e.end ? new Date(e.end).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "";
                   const evDot = e.deal && e.deal !== "_unmatched" ? dealDot[e.deal] || "#64748B" : "#3F3F46";
                   return (
-                    <div key={`cal-${i}`} className="flex items-center gap-2" style={{ padding: "6px 0 6px 4px" }}>
-                      <div className="flex-shrink-0 rounded-sm" style={{ width: 3, height: 18, background: evDot, opacity: 0.5 }} />
-                      <div className="flex-1 flex items-center gap-1.5 flex-wrap">
-                        <span style={{ fontSize: "12px", color: "#64748B" }}>{e.title}</span>
-                        <span style={{ fontSize: "10px", color: "#3F3F46" }}>{st}{en ? `–${en}` : ""}</span>
-                        {e.deal && e.deal !== "_unmatched" && (
-                          <span style={{ fontSize: "9px", color: evDot, opacity: 0.7 }}>{e.deal}</span>
-                        )}
-                      </div>
-                    </div>
+                    <MeetingCard key={`cal-${i}`} event={e} dotColor={evDot} mobile={true} />
                   );
                 })}
               </>

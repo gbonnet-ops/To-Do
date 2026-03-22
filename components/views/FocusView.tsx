@@ -3,6 +3,7 @@
 import { Task, CalendarEvent } from "@/lib/types";
 import { todayStr } from "@/lib/utils";
 import TaskRow from "@/components/TaskRow";
+import MeetingCard from "@/components/MeetingCard";
 
 interface FocusViewProps {
   tasks: Task[];
@@ -84,21 +85,9 @@ export default function FocusView({
             </div>
 
             {/* Meetings for this deal */}
-            {g.meetings.map((e, i) => {
-              const st = e.start ? new Date(e.start).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "";
-              const en = e.end ? new Date(e.end).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "";
-              return (
-                <div key={`m-${i}`} className="flex items-center gap-2.5" style={{ padding: "6px 0 6px 4px" }}>
-                  <div className="flex-shrink-0 rounded-sm" style={{ width: 3, height: 18, background: dot, opacity: 0.4 }} />
-                  <div className="flex-1">
-                    <span style={{ fontSize: "12px", color: "#64748B" }}>{e.title}</span>
-                    <span style={{ fontSize: "10px", color: "#3F3F46", marginLeft: "8px" }}>
-                      {st}{en ? `–${en}` : ""}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
+            {g.meetings.map((e, i) => (
+              <MeetingCard key={`m-${i}`} event={e} dotColor={dot} mobile={mobile} />
+            ))}
 
             {/* Tasks for this deal */}
             {g.tasks.map((task) => (
@@ -114,21 +103,9 @@ export default function FocusView({
           <div style={{ padding: "10px 0 4px", borderTop: "1px solid rgba(255,255,255,0.03)" }}>
             <span style={{ fontSize: "11px", fontWeight: 500, color: "#3F3F46" }}>Autres meetings</span>
           </div>
-          {unmatchedMeetings.map((e, i) => {
-            const st = e.start ? new Date(e.start).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "";
-            const en = e.end ? new Date(e.end).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "";
-            return (
-              <div key={`um-${i}`} className="flex items-center gap-2.5" style={{ padding: "6px 0 6px 4px" }}>
-                <div className="flex-shrink-0 rounded-sm" style={{ width: 3, height: 18, background: "#3F3F46", opacity: 0.4 }} />
-                <div className="flex-1">
-                  <span style={{ fontSize: "12px", color: "#64748B" }}>{e.title}</span>
-                  <span style={{ fontSize: "10px", color: "#3F3F46", marginLeft: "8px" }}>
-                    {st}{en ? `–${en}` : ""}
-                  </span>
-                </div>
-              </div>
-            );
-          })}
+          {unmatchedMeetings.map((e, i) => (
+            <MeetingCard key={`um-${i}`} event={e} dotColor="#3F3F46" mobile={mobile} />
+          ))}
         </div>
       )}
     </>

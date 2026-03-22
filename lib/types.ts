@@ -29,6 +29,7 @@ export interface CalendarEvent {
   date: string;
   location: string | null;
   deal?: string | null;
+  context?: string | null;
 }
 
 export interface EmailSuggestion {

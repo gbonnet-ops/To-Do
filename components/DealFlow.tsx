@@ -11,6 +11,7 @@ import {
   apiAddDeal, apiDeleteDeal,
   loadScannedGmailIds, saveScannedGmailIds,
   loadSeenCalendarKeys, saveSeenCalendarKeys, calEventKey,
+  loadCalContexts, saveCalContexts,
 } from "@/lib/store";
 import QuickAdd from "./QuickAdd";
 import SettingsPanel from "./SettingsPanel";
@@ -164,14 +165,21 @@ export default function DealFlow() {
       if (!res.ok) throw new Error(`Calendar API: ${res.status}`);
       const events: CalendarEvent[] = await res.json();
 
-      setCalEvents(events);
+      // Inject cached contexts into events
+      const cachedContexts = loadCalContexts();
+      const eventsWithContext = events.map((e) => {
+        const key = calEventKey(e.title, e.start);
+        return cachedContexts[key] ? { ...e, context: cachedContexts[key] } : e;
+      });
+
+      setCalEvents(eventsWithContext);
       setCalLastFetch(new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }));
 
       // Detect new calendar events
       const seenKeys = loadSeenCalendarKeys();
       const seenSet = new Set(seenKeys);
-      const allKeys = events.map((e) => calEventKey(e.title, e.start));
-      const newEvents = events.filter((e) => !seenSet.has(calEventKey(e.title, e.start)));
+      const allKeys = eventsWithContext.map((e) => calEventKey(e.title, e.start));
+      const newEvents = eventsWithContext.filter((e) => !seenSet.has(calEventKey(e.title, e.start)));
 
       // Save all current event keys as seen
       saveSeenCalendarKeys(allKeys);
@@ -181,6 +189,14 @@ export default function DealFlow() {
         fetchMeetingPreps(newEvents);
       }
 
+      // Fetch contexts for events that don't have one yet
+      const eventsNeedingContext = eventsWithContext.filter(
+        (e) => !e.context && e.deal !== "_unmatched"
+      );
+      if (eventsNeedingContext.length > 0) {
+        fetchMeetingContexts(eventsNeedingContext, cachedContexts);
+      }
+
       setStatusMsg({ type: "ok", text: `${events.length} meeting${events.length !== 1 ? "s" : ""} deal` });
     } catch (e) {
       setStatusMsg({ type: "error", text: `Calendar: ${e instanceof Error ? e.message : "erreur"}` });
@@ -188,6 +204,39 @@ export default function DealFlow() {
     setCalLoading(false);
     setTimeout(() => setStatusMsg(null), 5000);
   }, [weekOffset]);
+
+  // ── Fetch meeting contexts from emails (background, non-blocking) ──
+  const fetchMeetingContexts = useCallback(async (events: CalendarEvent[], existingContexts: Record<string, string>) => {
+    try {
+      const eventsToFetch = events.map((e) => ({
+        key: calEventKey(e.title, e.start),
+        title: e.title,
+      }));
+      const res = await fetch("/api/calendar/context", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ events: eventsToFetch }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const newContexts: Record<string, string> = data.contexts || {};
+      if (Object.keys(newContexts).length === 0) return;
+
+      // Merge with existing contexts and save
+      const merged = { ...existingContexts, ...newContexts };
+      saveCalContexts(merged);
+
+      // Update calEvents with new contexts
+      setCalEvents((prev) =>
+        prev.map((e) => {
+          const key = calEventKey(e.title, e.start);
+          return newContexts[key] ? { ...e, context: newContexts[key] } : e;
+        })
+      );
+    } catch {
+      // Silent fail — non-critical
+    }
+  }, []);
 
   // ── Gmail scan ──
   const scanEmails = useCallback(async () => {
@@ -657,6 +706,11 @@ export default function DealFlow() {
                 style={{ padding: "8px 0", borderTop: i > 0 ? "1px solid rgba(255,255,255,0.03)" : "none" }}
               >
                 <div className="flex-1 min-w-0">
+                  {m.meetingTitle && (
+                    <div style={{ fontSize: "10px", color: "#FBBF24", marginBottom: "2px", fontWeight: 500 }}>
+                      📅 {m.meetingTitle}
+                    </div>
+                  )}
                   <div style={{ fontSize: "13px", color: "#CBD5E1", marginBottom: "3px" }}>{m.text}</div>
                   <div className="flex gap-1.5 items-center flex-wrap">
                     {m.deal && <span style={{ fontSize: "10px", color: DEAL_DOT[m.deal] || "#64748B" }}>{m.deal}</span>}
