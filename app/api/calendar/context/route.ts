@@ -255,29 +255,27 @@ export async function POST(request: Request) {
     return `Meeting "${event?.title}"${dealInfo} (key: ${key}):\n${msgText}`;
   }).join("\n\n");
 
-  const prompt = `Pour chaque meeting ci-dessous, analyse les échanges email/Slack fournis et extrais les informations pertinentes.
-
-${eventSummaries}
-
-Pour chaque meeting, génère un objet JSON avec ces champs :
+  const system = `Analyse des échanges email/Slack pour extraire le contexte de meetings.
+Pour chaque meeting, génère un objet JSON avec :
 - "context": résumé court (max 200 caractères) de ce qui a été discuté concrètement
-- "agenda": liste des sujets/discussions prévus pour ce meeting, extraits des échanges (tableau de strings). Omets ce champ si aucun agenda n'est mentionné.
-- "documents": liste des documents à fournir/préparer pour ce meeting, extraits des échanges (tableau de strings). Omets ce champ si aucun document n'est mentionné.
+- "agenda": sujets/discussions prévus (tableau de strings). Omets si aucun agenda mentionné.
+- "documents": documents à fournir/préparer (tableau de strings). Omets si aucun document mentionné.
 
 RÈGLES CRITIQUES:
 - Base-toi UNIQUEMENT sur le contenu réel des messages, pas sur des suppositions.
-- Si un meeting est associé à un projet (ex: "Otrera"), IGNORE les messages qui parlent d'un AUTRE projet (ex: "Darwin", "Nova", etc.). Ne mélange JAMAIS les projets.
-- Si les messages fournis ne sont pas pertinents au meeting ou parlent d'un autre projet, ne pas inclure la clé dans le résultat.
-- N'invente JAMAIS d'agenda ou de documents. Ne les inclus que s'ils sont explicitement mentionnés dans les messages.
+- Si un meeting est associé à un projet, IGNORE les messages d'un AUTRE projet. Ne mélange JAMAIS les projets.
+- Si les messages ne sont pas pertinents, ne pas inclure la clé dans le résultat.
+- N'invente JAMAIS d'agenda ou de documents.
 
-Return ONLY a valid JSON object where keys are the meeting keys and values are objects with the fields above.
-Example: {"title|2025-03-20T10:00:00": {"context": "Jean demande validation du contrat avant vendredi", "agenda": ["Revue du contrat", "Pricing final"], "documents": ["Contrat v3 signé"]}}
-
+Return ONLY a valid JSON object. Keys = meeting keys, values = objects above.
+Example: {"title|2025-03-20T10:00:00": {"context": "Jean demande validation du contrat", "agenda": ["Revue du contrat"], "documents": ["Contrat v3"]}}
 No markdown, just JSON object.`;
+
+  const prompt = eventSummaries;
 
   let textContent: string;
   try {
-    textContent = await callClaude(prompt, { maxTokens: 2000 });
+    textContent = await callClaude(prompt, { maxTokens: 2000, system });
   } catch {
     return NextResponse.json({ contexts: {} });
   }

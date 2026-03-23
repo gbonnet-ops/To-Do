@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getSlackTokens, searchSlackMessages, findChannelsByKeywords } from "@/lib/slack";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { rateLimit } from "@/lib/rate-limit";
-import { callClaude } from "@/lib/claude";
+import { callClaude, HAIKU_MODEL } from "@/lib/claude";
 
 // POST /api/slack/scan — Scan Slack messages and extract task suggestions
 export async function POST(request: Request) {
@@ -60,15 +60,7 @@ export async function POST(request: Request) {
     .map((m, i) => `Slack ${i + 1}:\nFrom: @${m.from} in #${m.channel}\nDate: ${m.date}\nMessage: ${m.text}\n---`)
     .join("\n");
 
-  const prompt = `Analyze these Slack messages and extract actionable tasks/follow-ups.
-
-Existing tasks (don't duplicate): ${existingDesc}
-
-Available deals/projects: ${dealNames.join(", ")}
-
-${msgSummary}
-
-Return ONLY a valid JSON array where each suggested task has:
+  const system = `Extract actionable tasks from Slack messages. Return ONLY a valid JSON array where each task has:
 - "text": concise task description in French (max 60 chars)
 - "deal": one of the available deals, or null if unclear
 - "priority": "high", "medium", or "low"
@@ -78,9 +70,15 @@ Return ONLY a valid JSON array where each suggested task has:
 
 Only include actionable items. Max 8 suggestions. No markdown, no explanation, just JSON array. If no tasks found, return [].`;
 
+  const prompt = `Existing tasks (don't duplicate): ${existingDesc}
+
+Available deals/projects: ${dealNames.join(", ")}
+
+${msgSummary}`;
+
   let textContent: string;
   try {
-    textContent = await callClaude(prompt, { maxTokens: 2048 });
+    textContent = await callClaude(prompt, { maxTokens: 2048, model: HAIKU_MODEL, system });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Claude API error" }, { status: 500 });
   }

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getGoogleTokens, googleFetch } from "@/lib/google";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { rateLimit } from "@/lib/rate-limit";
-import { callClaude } from "@/lib/claude";
+import { callClaude, HAIKU_MODEL } from "@/lib/claude";
 
 interface GmailMessage {
   id: string;
@@ -101,22 +101,9 @@ export async function POST(request: Request) {
     .map((e, i) => `Sent ${i + 1}:\nTo: ${e.to}\nSubject: ${e.subject}\nBody: ${e.body}\n---`)
     .join("\n");
 
-  const prompt = `You are analyzing sent emails to determine which existing tasks may have been completed.
-
-Here are the user's open (incomplete) tasks:
-${taskList}
-
-Here are emails SENT by the user today:
-${emailList}
-
-For each task that appears to be completed based on the sent emails, return a JSON object.
-For example, if a task says "envoyer mail Fabrice" and there is a sent email to Fabrice, that task is likely done.
-
-CRITICAL RULES:
-- The email must DIRECTLY relate to the specific task. A match requires both the ACTION and the RECIPIENT/SUBJECT to align.
-- NEVER match a task from one project/deal with an email about a DIFFERENT project/deal. For example, a task about "Babylon" cannot be marked as done by an email about "Darwin" or "Nova" etc.
-- The deal/project name in the task MUST match the email context. If a task is tagged to deal "Babylon", only emails clearly about Babylon can complete it.
-- Be STRICT — only suggest completion if there's an obvious, direct match. When in doubt, do NOT include it.
+  const system = `Analyze sent emails to determine which existing tasks may have been completed.
+Match a task only if the email DIRECTLY relates to it (action + recipient/subject align).
+NEVER match across different projects/deals. Be STRICT — only obvious, direct matches.
 
 Return ONLY a valid JSON array where each item has:
 - "taskId": the task id
@@ -125,9 +112,15 @@ Return ONLY a valid JSON array where each item has:
 
 Max 10 matches. No markdown, no explanation, just JSON array. If no matches, return [].`;
 
+  const prompt = `Open tasks:
+${taskList}
+
+Emails SENT today:
+${emailList}`;
+
   let textContent: string;
   try {
-    textContent = await callClaude(prompt, { maxTokens: 1024 });
+    textContent = await callClaude(prompt, { maxTokens: 1024, model: HAIKU_MODEL, system });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Claude API error" }, { status: 500 });
   }

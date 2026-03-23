@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getGoogleTokens, googleFetch } from "@/lib/google";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { rateLimit } from "@/lib/rate-limit";
-import { callClaude } from "@/lib/claude";
+import { callClaude, HAIKU_MODEL } from "@/lib/claude";
 
 interface GmailMessage {
   id: string;
@@ -128,15 +128,7 @@ export async function POST(request: Request) {
     .map((m, i) => `Email ${i + 1}:\nFrom: ${m.from}\nSubject: ${m.subject}\nBody: ${m.body}\n---`)
     .join("\n");
 
-  const prompt = `Analyze these emails and extract actionable tasks/follow-ups.
-
-Existing tasks (don't duplicate): ${existingDesc}
-
-Available deals/projects: ${dealNames.join(", ")}
-
-${emailSummary}
-
-Return ONLY a valid JSON array where each suggested task has:
+  const system = `Extract actionable tasks from emails. Return ONLY a valid JSON array where each task has:
 - "text": concise task description in French (max 60 chars)
 - "deal": one of the available deals, or null if unclear
 - "priority": "high", "medium", or "low"
@@ -146,9 +138,15 @@ Return ONLY a valid JSON array where each suggested task has:
 
 Only include actionable items. Max 8 suggestions. No markdown, no explanation, just JSON array. If no tasks found, return [].`;
 
+  const prompt = `Existing tasks (don't duplicate): ${existingDesc}
+
+Available deals/projects: ${dealNames.join(", ")}
+
+${emailSummary}`;
+
   let textContent: string;
   try {
-    textContent = await callClaude(prompt, { maxTokens: 2048 });
+    textContent = await callClaude(prompt, { maxTokens: 2048, model: HAIKU_MODEL, system });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Claude API error" }, { status: 500 });
   }

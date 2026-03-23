@@ -210,37 +210,31 @@ export async function POST(request: Request) {
     return `Slack ${i + 1}:\n  De: @${s.from} dans #${s.channel || "dm"}\n  Date: ${s.date}\n  Message: ${s.body}`;
   }).join("\n\n");
 
-  const prompt = `Tu es un analyste M&A senior. Génère un récapitulatif structuré des échanges concernant le projet "${dealName}"${company ? ` (client: ${company})` : ""} pour ${periodLabel}.
+  const system = `Tu es un analyste M&A senior. Génère un récap structuré en français avec EXACTEMENT cette structure Markdown :
 
-Sources (${unique.length} échanges):
-${sourcesSummary}
-
-Génère un récap en français avec EXACTEMENT cette structure Markdown :
-
-## Échanges avec le client${company ? ` (${company})` : ""}
-Résumé des derniers échanges avec le client/la cible (emails, calls, demandes).
+## Échanges avec le client
+Résumé des derniers échanges avec le client/la cible.
 **To do :**
-- Liste des actions à mener côté client (relances, documents à obtenir, points à clarifier)
+- Actions côté client (relances, documents, points à clarifier)
 
 ## Échanges avec les acheteurs potentiels
-Pour CHAQUE acheteur/investisseur identifié dans les échanges, crée une sous-section :
-
 ### [Nom de l'acheteur]
-Résumé des derniers échanges avec cet acheteur (intérêt manifesté, questions posées, documents échangés, prochaines étapes).
+Résumé des échanges avec cet acheteur.
 **To do :**
-- Actions spécifiques à mener avec cet acheteur
+- Actions spécifiques
 
-(Répète pour chaque acheteur identifié dans les messages.)
+(Répète pour chaque acheteur.)
 
-RÈGLES :
-- Si aucun échange avec le client n'est trouvé, indique "Aucun échange identifié sur la période."
-- Si aucun acheteur n'est identifié, indique "Aucun échange avec des acheteurs identifié sur la période."
-- Sois concis et factuel. Pas de suppositions — base-toi uniquement sur le contenu des messages.
-- Les to do doivent être des actions concrètes et actionnables.`;
+RÈGLES : Si aucun échange trouvé, l'indiquer. Sois concis et factuel. Actions concrètes uniquement.`;
+
+  const prompt = `Projet "${dealName}"${company ? ` (client: ${company})` : ""} — ${periodLabel}.
+
+Sources (${unique.length} échanges):
+${sourcesSummary}`;
 
   let recap: string;
   try {
-    recap = await callClaude(prompt, { maxTokens: 4096 }) || "Impossible de générer le récap.";
+    recap = await callClaude(prompt, { maxTokens: 4096, system }) || "Impossible de générer le récap.";
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Claude API error" }, { status: 500 });
   }

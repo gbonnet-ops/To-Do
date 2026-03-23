@@ -269,26 +269,19 @@ export async function POST(request: Request) {
     ? ` (projet: ${deal}${company ? `, entreprise: ${company}` : ""})`
     : "";
 
-  const prompt = `Tu prépares un briefing pour un meeting "${title}"${dealInfo}.${attendeeInfo}
+  const system = `Génère un briefing de préparation de meeting en français (3-6 lignes max) basé sur les échanges récents.
+Inclus : sujets discutés récemment, questions/demandes en attente, points à trancher.
+Base-toi UNIQUEMENT sur le contenu des messages. IGNORE les messages d'un autre projet. Sois direct et factuel. Pas de formule de politesse.
+Si les messages ne sont pas pertinents, dis-le en une phrase.`;
 
-Voici les échanges récents (emails et messages Slack) avec les participants de ce meeting :
+  const prompt = `Meeting "${title}"${dealInfo}.${attendeeInfo}
 
-${sourceText}
+Échanges récents :
 
-IMPORTANT:
-- Base-toi UNIQUEMENT sur le contenu concret des messages ci-dessus. Ne fais PAS de suppositions sur le projet en général.
-- Si le meeting est lié à un projet spécifique, IGNORE les messages qui parlent d'un AUTRE projet. Ne mélange jamais les projets.
-- Résume ce qui a été dit/demandé/décidé récemment par les participants.
-
-Génère un briefing de préparation concis mais complet en français (3-6 lignes max). Inclus :
-- Ce dont les participants ont discuté récemment (sujets concrets)
-- Les questions/demandes en attente de réponse
-- Les points à trancher ou valider lors du meeting
-
-Sois direct et factuel. Pas de formule de politesse. Retourne uniquement le texte du briefing. Si les messages ne sont pas pertinents au meeting, dis-le en une phrase.`;
+${sourceText}`;
 
   try {
-    const context = (await callClaude(prompt, { maxTokens: 500 }))?.trim() || null;
+    const context = (await callClaude(prompt, { maxTokens: 500, system }))?.trim() || null;
     return NextResponse.json({ context });
   } catch {
     return NextResponse.json({ context: null });

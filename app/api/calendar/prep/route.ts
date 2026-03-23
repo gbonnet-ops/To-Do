@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getGoogleTokens, googleFetch } from "@/lib/google";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { rateLimit } from "@/lib/rate-limit";
-import { callClaude } from "@/lib/claude";
+import { callClaude, HAIKU_MODEL } from "@/lib/claude";
 
 interface GmailMessageDetail {
   id: string;
@@ -119,34 +119,30 @@ export async function POST(request: Request) {
 
   const existingDesc = existingTasks.slice(0, 20).join("; ");
 
-  const prompt = `De nouveaux meetings viennent d'apparaître dans le calendrier. Analyse les emails récents pour identifier les actions de préparation nécessaires avant chaque meeting.
-
-Nouveaux meetings:
-${meetingList}
-
-${emailContext ? `Emails récents liés:\n${emailContext}` : "Aucun email lié trouvé."}
-
-Tâches existantes (NE PAS dupliquer): ${existingDesc || "aucune"}
-
-Deals/projets disponibles: ${dealNames.join(", ")}
-
-Pour chaque meeting, propose 0 à 2 tâches de préparation si pertinent. Inspire-toi du contexte des emails (ex: si un email mentionne "préparer un agenda", "envoyer un document", "confirmer la présence de X", etc.).
-
-Si aucun email ne donne de contexte, propose une préparation générique UNIQUEMENT si le meeting semble important (pas de préparation pour des meetings récurrents banals comme "daily standup", "sync", "1:1").
+  const system = `Propose 0-2 tâches de préparation par meeting basées sur les emails récents. Pas de préparation pour les meetings banals (daily, sync, 1:1).
 
 Return ONLY a valid JSON array where each item has:
 - "meetingTitle": le titre du meeting concerné
 - "text": description concise de la tâche de préparation en français (max 60 chars)
 - "deal": one of the available deals, or null
 - "priority": "high" or "medium"
-- "deadline": "YYYY-MM-DD" (veille du meeting ou plus tôt si nécessaire)
+- "deadline": "YYYY-MM-DD" (veille du meeting ou plus tôt)
 - "source": "Prépa: [nom du meeting court]"
 
 Max 6 suggestions total. No markdown, no explanation, just JSON array. Return [] if no prep needed.`;
 
+  const prompt = `Nouveaux meetings:
+${meetingList}
+
+${emailContext ? `Emails récents liés:\n${emailContext}` : "Aucun email lié trouvé."}
+
+Tâches existantes (NE PAS dupliquer): ${existingDesc || "aucune"}
+
+Deals/projets disponibles: ${dealNames.join(", ")}`;
+
   let textContent: string;
   try {
-    textContent = await callClaude(prompt, { maxTokens: 1500 });
+    textContent = await callClaude(prompt, { maxTokens: 1500, model: HAIKU_MODEL, system });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Claude API error" }, { status: 500 });
   }
