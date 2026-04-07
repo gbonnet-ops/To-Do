@@ -486,6 +486,12 @@ for i, cl in enumerate(clients_sorted):
     ws.cell(row=r, column=19, value=f'=Q{r}').number_format = '#,##0'
     # Software flag (col T = 20)
     ws.cell(row=r, column=20, value=f'=IF(B{r}="Software",1,0)')
+    # # active revenue lines per year (cols U..AG = 21..33)
+    for k, y in enumerate(YEARS):
+        yc = src_year_col(y)
+        f = (f'=SUMPRODUCT(({SRC}!$A${SRC_FIRST}:$A${SRC_LAST}=$A{r})*'
+             f'({SRC}!${yc}${SRC_FIRST}:${yc}${SRC_LAST}>0))')
+        ws.cell(row=r, column=21+k, value=f).number_format = '0'
 
 print(f'Helper_Clients: rows {H_FIRST}..{H_LAST} ({len(clients_sorted)} clients)')
 
@@ -727,6 +733,98 @@ for i, y in enumerate(YEARS):
 widen(ws, first_col_width=42, year_width=13)
 ws.freeze_panes = 'B5'
 
+# =============== Cross-sell ===============
+ws = wb.create_sheet('Cross-sell')
+ws.sheet_properties.tabColor = 'FF173B57'
+ws['A1'] = 'Cross-sell — Product breadth per client (£ GBP)'
+ws['A1'].font = Font(name=ARIAL, size=14, bold=True, color=NAVY)
+ws['A2'] = '"Lines" = active revenue lines per client (proxy for product/country breadth, 1 line = unique product × country combo).'
+ws['A2'].font = Font(name=ARIAL, size=9, italic=True, color='FF666666')
+
+ws.cell(row=4, column=1, value='Metric')
+style_header(ws.cell(row=4, column=1))
+add_year_headers(ws, 4, 2)
+
+# Helper ranges for # lines per year (cols U..AG in Helper_Clients = letters U..AG)
+def H_LINES(year):
+    col = get_column_letter(21 + (year-2014))
+    return f'{HELP}!${col}${H_FIRST}:${col}${H_LAST}'
+
+# Row 5: Avg lines per active client
+ws.cell(row=5, column=1, value='Avg # lines per active client')
+style_row_label(ws.cell(row=5, column=1), bold=True)
+for i, y in enumerate(YEARS):
+    rng_lines = H_LINES(y); rng_rev = H_RNG_FY(y)
+    f = f'=IFERROR(SUM({rng_lines})/COUNTIF({rng_rev},">0"),"-")'
+    style_num(ws.cell(row=5, column=2+i, value=f), fmt='0.00', bold=True)
+
+# Row 7: # Mono-line clients (exactly 1)
+ws.cell(row=7, column=1, value='# Mono-line clients (1 line)')
+style_row_label(ws.cell(row=7, column=1))
+for i, y in enumerate(YEARS):
+    f = f'=COUNTIF({H_LINES(y)},1)'
+    style_num(ws.cell(row=7, column=2+i, value=f))
+
+# Row 8: # Multi-line clients (>=2)
+ws.cell(row=8, column=1, value='# Multi-line clients (>=2)')
+style_row_label(ws.cell(row=8, column=1))
+for i, y in enumerate(YEARS):
+    f = f'=COUNTIF({H_LINES(y)},">=2")'
+    style_num(ws.cell(row=8, column=2+i, value=f))
+
+# Row 9: % Multi-line
+ws.cell(row=9, column=1, value='% Multi-line clients')
+style_row_label(ws.cell(row=9, column=1))
+for i in range(13):
+    col = get_column_letter(2+i)
+    style_pct(ws.cell(row=9, column=2+i,
+        value=f'=IFERROR({col}8/({col}7+{col}8),"-")'))
+
+# Row 11: Revenue from mono-line clients
+ws.cell(row=11, column=1, value='Revenue from mono-line clients (£)')
+style_row_label(ws.cell(row=11, column=1))
+for i, y in enumerate(YEARS):
+    rng_lines = H_LINES(y); rng_rev = H_RNG_FY(y)
+    f = f'=SUMIFS({rng_rev},{rng_lines},1)'
+    style_num(ws.cell(row=11, column=2+i, value=f))
+
+# Row 12: Revenue from multi-line clients
+ws.cell(row=12, column=1, value='Revenue from multi-line clients (£)')
+style_row_label(ws.cell(row=12, column=1))
+for i, y in enumerate(YEARS):
+    rng_lines = H_LINES(y); rng_rev = H_RNG_FY(y)
+    f = f'=SUMIFS({rng_rev},{rng_lines},">=2")'
+    style_num(ws.cell(row=12, column=2+i, value=f))
+
+# Row 13: % Revenue from multi-line
+ws.cell(row=13, column=1, value='% Revenue from multi-line clients')
+style_row_label(ws.cell(row=13, column=1), bold=True)
+for i in range(13):
+    col = get_column_letter(2+i)
+    style_pct(ws.cell(row=13, column=2+i,
+        value=f'=IFERROR({col}12/({col}11+{col}12),"-")'), bold=True)
+
+# Distribution block
+dist_start = 16
+ws.cell(row=dist_start, column=1, value='Distribution of clients by # lines').font = Font(name=ARIAL, size=11, bold=True, color=NAVY)
+ws.cell(row=dist_start+1, column=1, value='# lines')
+style_header(ws.cell(row=dist_start+1, column=1))
+add_year_headers(ws, dist_start+1, 2)
+buckets = [(1,'1'),(2,'2'),(3,'3'),(4,'4+')]
+for k,(b,label) in enumerate(buckets):
+    r = dist_start + 2 + k
+    ws.cell(row=r, column=1, value=label)
+    style_row_label(ws.cell(row=r, column=1))
+    for i, y in enumerate(YEARS):
+        if label == '4+':
+            f = f'=COUNTIF({H_LINES(y)},">=4")'
+        else:
+            f = f'=COUNTIF({H_LINES(y)},{b})'
+        style_num(ws.cell(row=r, column=2+i, value=f))
+
+widen(ws, first_col_width=38, year_width=13)
+ws.freeze_panes = 'B5'
+
 # =============== Summary ===============
 ws = wb.create_sheet('Summary', 0)  # first tab
 ws.sheet_properties.tabColor = 'FF173B57'
@@ -827,7 +925,7 @@ ws.freeze_panes = 'B5'
 # Reorder tabs: Summary, Revenue Overview, Software vs Services, By Department, By Product,
 # By Geography, Cohort Analysis, Client Dynamics, Client Concentration, Helper_Clients, Source_Evolution, Source_Info
 desired = ['Summary','Revenue Overview','Software vs Services','By Department','By Product','By Geography',
-           'Cohort Analysis','Client Dynamics','Client Concentration','Helper_Clients','Source_Evolution','Source_Info']
+           'Cohort Analysis','Client Dynamics','Client Concentration','Cross-sell','Helper_Clients','Source_Evolution','Source_Info']
 wb._sheets = [wb[name] for name in desired]
 
 wb.save(OUT)
